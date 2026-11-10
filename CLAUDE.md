@@ -22,6 +22,14 @@ Keep it factual. Don't soften your own mistakes.
 
 When I say ‘log session’, append a short summary: what we worked on, decisions made, and the prompts that mattered.
 
+## Prompt log
+
+Append every prompt I send you to the "Prompt log" section of `docs/AI_LOG.md`, verbatim, with the date and time. Do it at the start of each turn, before anything else. Don't summarise, correct or reformat the prompt.
+
+## Reminders
+
+When I ask you to record an assumption or something to revisit, append it to the "Reminders" section of `docs/AI_LOG.md` with the date, the assumption, and why we made it.
+
 ## Git
 
 Never commit or push. I commit.
