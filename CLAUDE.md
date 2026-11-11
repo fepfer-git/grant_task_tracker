@@ -26,9 +26,9 @@ When I say ‘log session’, append a short summary: what we worked on, decisio
 
 Append every prompt I send you to the "Prompt log" section of `docs/AI_LOG.md`, verbatim, with the date and time. Do it at the start of each turn, before anything else. Don't summarise, correct or reformat the prompt.
 
-## Reminders
+## Considerations and limitations
 
-When I ask you to record an assumption or something to revisit, append it to the "Reminders" section of `docs/AI_LOG.md` with the date, the assumption, and why we made it.
+When I ask you to record an assumption, a consideration, a limitation or something to revisit, add it to the "Considerations and limitations" section at the end of `docs/DESIGN.md`, with the situation, the decision, and why. `docs/AI_LOG.md` holds logs only: corrections, prompts and session summaries.
 
 ## Git
 

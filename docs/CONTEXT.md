@@ -1,6 +1,6 @@
 # Context
 
-Source: `spec/Software-Developer-Technical-Exercise.pdf`. This file records only what the spec states about the product. Gaps and ambiguities are in "Open questions" at the end. Section numbers (§) are the spec's.
+This file records only what the exercise spec states about the product. Section numbers (§) are the spec's.
 
 ## 1. Background (§1)
 

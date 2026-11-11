@@ -1,13 +1,5 @@
 # AI Log
 
-## Reminders
-
-### 2026-11-11: Grants are never deleted
-
-- **Assumption:** Grants cannot be deleted. A grant exists permanently, and its lifecycle ends when it is closed.
-- **Why:** The spec (`docs/CONTEXT.md`) doesn't mention deleting grants. A grant has no due date, so an old grant that is no longer relevant is handled by closing it with an optional closed note that gives the reason. That keeps the history readable for other officers and for support (OP-4).
-- **Consequence:** No delete endpoint. The Grant → GrantTask FK uses `Restrict`, not cascade.
-
 ## Correction log
 
 ### 2026-11-11: Architecture and data model proposal
@@ -26,6 +18,36 @@
 |---|---|---|
 | I pushed OP-1 concerns (file-based SQLite, WAL, multiple copies, migrations) into the data-model decisions. | Out of scope for this round. The user wants the BR design finished first, then a separate pass over the OPs to decide what to handle and what goes to the README as a limitation. | OPs are deferred. DESIGN.md marks OP topics as "not yet decided". |
 | I suggested the API could require a ClosedNote when tasks are still pending. | The user decided the note is optional in every case. | ClosedNote is optional in the API. The UI always asks for it but never requires it. |
+
+### 2026-11-11: Open questions Q1–Q6
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Q1: one configured program time zone defines "today". | Officers work in several regional offices, possibly in different time zones. One zone gives the wrong "today" for some offices. | Added an `Office` table with a time zone. "Today" follows the office. Whether the office hangs off the Grant or the Task is still open (DESIGN.md, section 9). |
+| Q3: leave pending tasks on closed grants pending, and exclude them from the overdue list. | The user pointed out that this conflicts with BR-6: a pending, past-due task would be hidden from the overdue list. It also leaves tasks in a state no one can act on. | Added a `Cancelled` task status and `CancelledAtUtc`. Closing a grant cancels its pending tasks. Cancelled tasks are never overdue. |
+
+### 2026-11-11: Offices and task status
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| An `Office` table linked to the Grant (option A), and Sydney and Perth as seed offices. | Multiple offices with different time zones is an assumption. The spec doesn't say so, and tying offices to grants is just another guess. | The whole program uses one time zone, `Australia/Sydney`. The `Office` table is removed. The multi-office options are recorded as a reminder and consideration only. |
+| A stored `Status` column on `GrantTask`, alongside `CompletedAtUtc` and `CancelledAtUtc`. | It duplicates the timestamps and needs extra rules to keep them consistent. | `Status` is removed from storage. It's derived: `CompletedAtUtc` set → Completed, `CancelledAtUtc` set → Cancelled, neither → Pending. A DB check constraint stops both being set. |
+
+### 2026-11-11: Enum storage and document layout
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Store enums (`TaskPriority`, `GrantStatus`) as strings in the database, so the data is readable and safe to reorder. | The user spotted that `/tasks/overdue` sorts by priority. String columns sort alphabetically (`High` < `Low` < `Medium`), so `ORDER BY Priority DESC` would give Medium, Low, High. | Enums are stored as ints with explicit values (`Low = 1`, `Medium = 2`, `High = 3`), so database order matches business order. The API still serialises them as strings. |
+| Reminders (assumptions and considerations) kept in `AI_LOG.md`, and some considerations mixed into the business-rules section of `DESIGN.md`. | It mixed the log with design content. | All of them moved to a new last section of `DESIGN.md`, "Considerations and limitations". `AI_LOG.md` now holds logs only. `CLAUDE.md` was updated to match. |
+
+### 2026-11-12: Operations needs (OP) pass
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Build the cheap parts of OP-1: a SQLite file with WAL and a busy timeout, and safe seeding when several copies start at once. | The user pointed out that SQLite isn't how the tool would run for real. Production would be Kubernetes with several replicas and PostgreSQL or SQL Server, where saved data survives a restart. A request cut off by a restart is covered by OP-3 (safe to repeat), and OP-5 keeps traffic away from unhealthy pods. | OP-1 is not built. It will be explained as a limitation. |
+| Build one cheap part of OP-4: show the `traceId` in UI error messages. | The user chose to skip OP-4, since error bodies already carry a `traceId` (§5.1). | OP-4 is not built. |
+| A UI banner saying "Can't reach the server. Nothing was saved." | Wrong. After a timeout the client doesn't know whether the server saved the change; it may have committed before the response was lost. I found this while reviewing the user's timeout approach. | The message must say the change may not have been saved and that sending it again is safe. |
+| No UI tests: describe a manual check for the server-problem banner in the testing strategy, and state that the risk isn't covered by automated tests. | The user wants a few Vitest tests for the important UI cases. | Added a UI component test level (Vitest + React Testing Library). How one command runs both the .NET and the UI tests is still open. |
 
 ## Prompt log
 
@@ -46,3 +68,27 @@
 ### 2026-11-11 04:24 (+07:00)
 
 > 1. We will handle the OPs later. This round, we will focus on gather technical decision and design for the Business Rules, complete the detail design with all business rules agreements, data model, edge cases, testing strategy. Then we will take a look at the OPs first, and decide which should be handel and worth handle, which one is limitation and should go to the README.md. 2. Correct, the seeds data contains data for all scenario we should handle from BRs, so this is correct. 3. You are correct to spot this, record this to the design, Add new task to grant or update grant should update the version to avoid race-condition. 4. For BR-5, throw exception with 409 error response follow the ProblemDetails/RFC 9457 so it should have title. However we should also handle this at UI level as well, by disable the close grant button when there are still high task open. 5. No, the close note is optional in all case. The UI should always ask for close note/reason, however it is optional and decide by the user. 6. Yes, return 200 for that. Also, handle the UI by disable the button, so user cannot closed a task that is already closed via UI. When they do that via swagger or API request, return 200. 7. I agree.
+
+### 2026-11-11 20:15 (+07:00)
+
+> Q1. I suggest add another table for Office, where it store the Office name and the timezone of the office, since there could be multiple office working on a same task, which could affect the due date. Allow officer that create the task be able to update the office, so the due date or today will be follow the office. Example: Expire today (Sydney), so that people working in other office can know. (Please consider challenge me if you think this is not really a good approach) - Record this to the test strategy as one of the edge case and senario to test. Q2. Agree, task should be read only after the Grant is close. Consider gate this in both UI and Back-end. Update test strategy to add this as one of the case to test. Q3. I am not agree, it would vioalte the Busines rule 6. Please help me update the design. Consider: Add a new status to the Task: Cancelled, along with Pending and Compeleted. Now everytime a grant is closed with the Task still pending. All tasks will be update to canceled. It would be more reasonable than left a task pending without officer could do anything with it. Also the overdue is approriate for the task you could do. But for canceled that, it is reasonable to not appear in the Overdue list. So please record this and update the design (also feel free to challenge me), also add the canceledatutc for the task, also help me add this to the reminder: Consider that a grant coudl be re-opend, as in realife there cuould be a situation where the task is medium, then the grant is close, but later that task for some reason need to be done, then we will still have a way to re-open the grant and continue with the task (record this as limitation and design only, we will not build this.) Q4. Yes Q5. Focus on .NET test first, the requirement require that all test should be run with 1 command, please keep that in mind (All tests run with one command and pass every time). Q6. Yes.
+
+### 2026-11-11 20:52 (+07:00)
+
+> 1. I agree with you. However, Office tie to Grant is also not a good choice. They are just asumption. I suggest we keep the whole program in 1 single timezone as Sydney. Please help me record this edge case of many offices. They are not clarify clearly in the requirements. So there is 2 choices: 1: The Office table option I mentioned earlier. 2. We could also consider the due date is Date Time instead of Date only, so we can ensure the due date is accurate. However this also require that the assumption that there are many office, each office has a different timezone and the timezone will be tie with the computer time of the officer. So please record these as consideration and reminder. We will not implement this. 2. Keep my idea, and state that to README 3. I agree on the racing. However for the Status, how about remove the status completely, we decide the status based on the CompleteAtUTC and CancelledAtUtc, so task with complete date is completed, with cancelled date is cancelled, without both is pending.
+
+### 2026-11-11 21:23 (+07:00)
+
+> Can you help me check the Enum of priority and status. I see that they are stored as String. However, the overdue list sort by priority, so I would make sense to store as int. Please help me check, correct me if I am wrong. Also move the reminder from AI_LOG to design, create a new section for consideration business rules or limiation, and move them to the end, instead of mixing. AI_LOG now should not have anything beside the log.
+
+### 2026-11-12 02:43 (+07:00)
+
+> I think we should handle these OP: OP2, OP3 and OP 5. For OP1, it is not very realistic to handle it with SQL Lite, we use SQL lite because this is a small project. However, in a real devleopment environment, the project should be deploy in a k8s with multiple replica, and sever with a database such as POSTgresql or MS SQL. so the case where data loss is not very realistic as data will be saved to the DB. If that happen, we still have the OP-3 handle it, as repeating the request will not affect the data. Also, enable OP5 could help as well, since the health check ensure the request only go to the health pod. I think we can handle with a small check in the UI, that the time out is a few second, if there is no error reponse return or it is not in range of 400-499. Then we consider something wrong with the server and announce to the Client. that way they know there is something wrong, they can still savely re-send the request. So pelase consider this approach (feel free to correct me if I am wrong). OP2. Yes, this is a good approach/ OP3. Yes handle this. Please consider handle this in both UI and BE. Consider let UI handle the ID, so UI decide an ID for a task, so when there is another task is create again with the same ID, an exception should be return. We will also handle the UI that will not enable the button again when the response from server is not reach the client. OP4. I think we could ignore this, as in the Problem detail follow the RFC9457 standard, we should already return the traceID for the client right? OP5. Handle this. OP6, put it to the consideration and limitation.
+
+### 2026-11-12 02:55 (+07:00)
+
+> 1. I agree, 200 when everything match. 409 when they do not. 2. Agree 3. Yes 4. SQLite file, plain configuration. 5. I don't think we need this. 6. I think it is reasonable for a few Vitest for UI in important cases. 7. Yes.
+
+### 2026-11-12 03:14 (+07:00)
+
+> Choose optin A, and help me add summary for the README based on our converstation.
