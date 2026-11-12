@@ -2,7 +2,22 @@
 
 ## Phase
 
-We are in the design phase. Do not write or change code. Do not create files I haven't asked for.
+We are in the build phase. `docs/DESIGN.md` is the agreed design: build what it says. If the design is silent, unclear or turns out to be wrong, stop and ask (see Context) instead of deciding on your own. When we change a decision, update `docs/DESIGN.md` too.
+
+Work from `docs/PLAN.md`:
+
+- Don't write code until I've approved the plan.
+- Build one part at a time. Don't start the next part until I've reviewed the current one.
+- When a part is finished, update its entry in `docs/PLAN.md`: mark it Built, and record what was built, each test case, and which BR or OP each test covers. Include the mutation checks: the code you broke on purpose and the test that failed.
+- Don't create files that the plan doesn't call for without asking me first.
+
+## Tests
+
+- Follow Arrange / Act / Assert, with `// Arrange`, `// Act` and `// Assert` comments.
+- Name .NET tests `Given_<State>_When_<Action>_Then_<Outcome>`. Name Vitest tests `given <state>, when <action>, then <outcome>`.
+- Test one behaviour per test. Use `[Theory]` for the boundaries of a single rule.
+- Never use the real clock, the machine's time zone or shared state. Tests must pass in any order and in parallel.
+- Every BR or OP test must fail when its rule is broken. Prove it with a mutation check before marking a part Built.
 
 ## Context
 

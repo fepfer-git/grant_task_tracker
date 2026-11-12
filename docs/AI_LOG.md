@@ -49,6 +49,15 @@
 | A UI banner saying "Can't reach the server. Nothing was saved." | Wrong. After a timeout the client doesn't know whether the server saved the change; it may have committed before the response was lost. I found this while reviewing the user's timeout approach. | The message must say the change may not have been saved and that sending it again is safe. |
 | No UI tests: describe a manual check for the server-problem banner in the testing strategy, and state that the risk isn't covered by automated tests. | The user wants a few Vitest tests for the important UI cases. | Added a UI component test level (Vitest + React Testing Library). How one command runs both the .NET and the UI tests is still open. |
 
+### 2026-11-12: Build plan
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| `DESIGN.md` §3.2 and BR-3 said the database's max length on `Title` is a second line of defence. | SQLite doesn't enforce maximum lengths, so the claim was false for this app. I found it while planning Part 4; the user confirmed the correction. | The design text now says the domain is the only length check on SQLite, and PostgreSQL or SQL Server would enforce the column lengths. |
+| API tests pinned the fake clock to `2026-03-11T01:00:00Z` (Sydney 12:00), and the seed data had no timestamps defined. | At that instant the UTC date and the Sydney date are the same, so if the code were accidentally changed to use the UTC date, only the Part 3 clock tests would notice. The user asked for times where the UTC date and the Sydney date differ, so every level catches that regression. | The fake clock is pinned to `2026-03-10T22:00:00Z` (Sydney 2026-03-11 09:00). Every seeded timestamp is 09:00 Sydney, which is the previous day in UTC. Tests assert literal dates and instants, never values computed with the code under test. |
+| Test names such as `Given_ClosedGrantAndInvalidTitle_When_AddingTask_Then_ThrowsBr1`, using `Title` for the task's title. | The user pointed out that `InvalidTitle` next to `ClosedGrant` can be read as the grant's title. | Every test name that refers to the task's title now says `TaskTitle` (for example `Given_ClosedGrantAndInvalidTaskTitle_When_AddingTask_Then_ThrowsBr1`). A naming rule was added to the plan's test conventions. |
+| The plan's coverage map labelled each rule with a short name (for example "BR-1 No task on a closed grant"). | The user asked for the full text of each rule and need, so the map can be checked against the spec without switching files. | The coverage map now quotes each BR and OP in full, and summarises the two design rules (§4.7, §3.6). |
+
 ## Prompt log
 
 ### 2026-11-11 01:49 (+07:00)
@@ -92,3 +101,38 @@
 ### 2026-11-12 03:14 (+07:00)
 
 > Choose optin A, and help me add summary for the README based on our converstation.
+
+### 2026-11-12 03:36 (+07:00)
+
+> We can now move to the implementation phase, please help me update the CLAUDE.md to indicate the build phase. Please prepare a plan first before doing any implementation. Propose a plan based on the agreement and the design, split the work in the plan to several small part, so it is easier for me to review, check your tests, consider edge case, etc. Each parts need a definition of done to summary what we will do and how it is consider as done, what are the test cases, make sure you prove the test actually cover the BRs or the OPs. Note: after the plan is approved, and go to the build phase, after each part is finished built. you should update the plan and mark it as build, with summary of what is build/cover, what are the test cases, what does the test case cover. Please make sure the test are follow best practice. EX: AAA, naming convention: Given_When_Then, etc.
+
+### 2026-11-12 16:16 (+07:00)
+
+> 1.I have installed nidejs, 2. Go with xUnit 3. Yes, 4. update and correct it. 5 Agree 6. yes, add swagger ui. 7. by hand. 
+>
+> Also please help me making sure: The seed data is the same everytime, make sure the date closed or complete is reasonable and testable. Ex: the time set somehow that we can test the edge case that the UTC time is in another date and the correct time is in Sydney, so we can avoid a case where the code is accidentally change to UTC, and the test can still catch it. Also check how SQL lite handle the date store in the DB, and consider coverter. As I remember postgresql store date with UTC timezone.
+
+### 2026-11-12 17:35 (+07:00)
+
+> I have review the Plan, there is several comment: 
+>
+> Please help me update this table to state full text of the business rules and ops so it is easier for me to check.
+>
+>
+> ```
+> Rule / need	Domain	Infrastructure	API	UI
+> BR-1 No task on a closed grant	Part 1		Part 6	Part 11
+> BR-2 Due date	Part 1	Part 4 (date comparison in SQL)	Parts 3, 6	Part 11
+> BR-3 Title	Part 1		Part 6	Part 11
+> BR-4 Complete once	Part 2		Part 6	Part 11
+> BR-5 Close blocked by pending High	Part 2		Part 6	Part 12
+> BR-6 Overdue	Part 2	Part 4	Parts 3, 5	Part 11
+> §4.7 Closed grant is read-only	Part 2		Part 6	Parts 11, 12
+> §3.6 Dates stored correctly		Part 4	Part 5	Parts 10, 11
+> OP-2 Concurrency		Part 4 (version checks)	Part 7 (retry)	
+> OP-3 Safe repeats, unreachable server			Part 7	Parts 10, 11
+> OP-5 Health checks			Part 8
+> ```
+>
+>
+> Also please explain this test: "Given_ClosedGrantAndInvalidTitle_When_AddingTask_Then_ThrowsBr1" does the InvalidTitle here is the title of the Task? If it is, please update the name as it can be miss-understand to title of the grant.

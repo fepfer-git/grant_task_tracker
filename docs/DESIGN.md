@@ -13,6 +13,7 @@ Spec references (§, BR-n, OP-n) point to `docs/CONTEXT.md`. Items marked **[Ope
 | Errors | `ProblemDetails` (RFC 9457) for every error response, produced by one exception-handling middleware |
 | Time | `TimeProvider`, injected. Business logic never calls `DateTime.Now` or `DateTime.UtcNow` (BR-6). "Today" is the date in one program time zone, `Australia/Sydney` (§4.0). |
 | Health checks | ASP.NET Core health checks: `/health/live` and `/health/ready` (§6.4) |
+| API documentation | The built-in OpenAPI document (`Microsoft.AspNetCore.OpenApi`) and Swagger UI (`Swashbuckle.AspNetCore.SwaggerUI`), in Development only (§5) |
 | Front end | React + TypeScript (Vite) |
 | Tests | xUnit for .NET. Vitest + React Testing Library for a few UI cases. One command runs both: `npm test` at the repository root (§9). |
 
@@ -26,7 +27,7 @@ src/
 ├─ GrantTracker.Domain/           # Grant, GrantTask, enums, rules as methods; no dependencies
 └─ GrantTracker.Infrastructure/   # AppDbContext, EF configuration, migrations, seeding
 tests/
-└─ GrantTracker.Tests/            # Domain/ (no database), Api/ (SQLite in-memory)
+└─ GrantTracker.Tests/            # Domain/ (no database), Infrastructure/ and Api/ (SQLite in-memory)
 ui/src/                           # React app; Vitest tests next to the components they test
 ```
 
@@ -92,7 +93,7 @@ Grants are **never deleted** (see §10.1). There is no create or update endpoint
 |---|---|---|---|
 | Id | `Guid` | PK | Chosen by the client (the UI) when the task is created, so creating a task is safe to repeat (§6.3) |
 | GrantId | `Guid` | FK → Grant, required, `OnDelete(Restrict)` | |
-| Title | `string` | Required, trimmed, 1–100 characters | BR-3 |
+| Title | `string` | Required, trimmed, 1–100 characters | BR-3. Enforced by the domain. The column's max length isn't enforced by SQLite (§3.6). |
 | DueDate | `DateOnly` | Required | BR-2. A calendar date in the program time zone. |
 | Priority | `TaskPriority` | Required, stored as int (`Low = 1`, `Medium = 2`, `High = 3`) | Stored as integer for database sorting (`High > Medium > Low`); serialised as string in API. |
 | CreatedAtUtc | `DateTime` | Required, set by the server | From `IAppClock` |
@@ -182,6 +183,23 @@ Completing a task doesn't change the grant's Version.
 
 The version check happens on the server within a single request (load → change → save). The client doesn't send a version (no `If-Match`). §6.2 explains why it isn't needed.
 
+### 3.6 Dates and times in the database
+
+SQLite has no date or time types, so EF Core stores them as text. The code has two kinds of date value, and they're stored differently:
+
+| Kind | .NET type | Fields | Stored in SQLite as | PostgreSQL equivalent |
+|---|---|---|---|---|
+| Calendar date in the program time zone (Sydney) | `DateOnly` | `ApplicationDate`, `DueDate` | `TEXT`, `'YYYY-MM-DD'` | `date`: no time and no time zone |
+| Instant | `DateTime`, always UTC | `CreatedAtUtc`, `CompletedAtUtc`, `CancelledAtUtc`, `ClosedAtUtc` | `TEXT`, `'YYYY-MM-DD HH:MM:SS.FFFFFFF'`, with no offset | `timestamp with time zone`: stored as UTC |
+
+- **Calendar dates are not instants.** A due date of 2026-03-11 means that day in Sydney. It is never converted to or from UTC, in the database, the API or the UI. Comparing `'YYYY-MM-DD'` text sorts and compares correctly, so `DueDate < today` works in SQL.
+- **UTC converter.** SQLite (like SQL Server's `datetime2`) loses `DateTime.Kind`: values come back as `Unspecified`. The API would then serialise them without the `Z` suffix, and a client would read them as local time. A value converter on every `DateTime` and `DateTime?` property in `AppDbContext`:
+  - **On read:** marks the value as UTC (`DateTime.SpecifyKind(value, DateTimeKind.Utc)`). The stored text isn't shifted.
+  - **On write:** throws if the value isn't UTC. A non-UTC value means some code used `DateTime.Now` or a local time, which is a bug. It's better to fail loudly than to store a shifted time.
+- **PostgreSQL** (§10.5) stores `timestamp with time zone` as UTC, and Npgsql already refuses non-UTC `DateTime` values. `DateOnly` maps to `date`, which has no time zone. The converter stays harmless there.
+- **No `DateTimeOffset`.** EF Core can't sort or compare `DateTimeOffset` columns in SQLite, and the offset adds nothing when every instant is UTC.
+- **Maximum lengths.** SQLite doesn't enforce the maximum lengths configured in EF (`Title`, `Reference`, `OrganisationName`, `ClosedNote`), so in this app the domain is the only length check. PostgreSQL and SQL Server would enforce them as a second line of defence.
+
 ## 4. Business rules
 
 ### 4.0 "Today"
@@ -205,7 +223,11 @@ The API returns `today` with each grant response. The UI uses it for client-side
 ### BR-3: Title
 - Trimmed first. Then required (not empty and not whitespace-only) and at most 100 characters.
 - Length is counted in .NET `string.Length` (UTF-16 code units). The UI counts the same way (JavaScript `.length`).
-- API: **400** `ValidationProblemDetails`, keyed on `title`. The DB column also has max length 100, as a second line of defence.
+- API: **400** `ValidationProblemDetails`, keyed on `title`. The column is configured with max length 100, but SQLite doesn't enforce it (§3.6), so the domain is the only check in this app.
+
+### Order of checks when adding a task
+1. BR-1 first. On a closed grant, the input doesn't matter: **409** `BR-1`.
+2. Then BR-2 and BR-3 together. If both the title and the due date are invalid, one **400** carries both field errors, so the form can show them at once.
 
 ### BR-4: Complete a task
 `GrantTask.Complete(nowUtc)` checks in this order:
@@ -273,10 +295,11 @@ The check lives in the domain (`GrantTask.Complete` asks its grant), so every en
 | `GET /tasks/overdue` | 200: list | — |
 | `GET /health/live` | 200 `Healthy` (§6.4) | — |
 | `GET /health/ready` | 200 `Healthy` (§6.4) | 503 `Unhealthy` when the database can't be reached |
+| `GET /openapi/v1.json`, `GET /swagger` | The OpenAPI document and Swagger UI. **Development only.** | — |
 
 `POST /grants/{id}/tasks` body: `{ "id": "<guid>", "title": "...", "dueDate": "YYYY-MM-DD", "priority": "Low" | "Medium" | "High" }`. The `id` is required (§6.3).
 
-Enums are stored as integers in the database (`GrantStatus`: `Open = 0`, `Closed = 1`; `TaskPriority`: `Low = 1`, `Medium = 2`, `High = 3`), but serialised as strings in JSON/API DTOs (`"Open"`, `"Closed"`, `"Low"`, `"Medium"`, `"High"`). `GrantTaskStatus` enum used in DTOs and domain logic is also mapped to strings (`"Pending"`, `"Completed"`, `"Cancelled"`). `DateOnly` is serialised as `"YYYY-MM-DD"`. `DateTime` values are ISO 8601 UTC with a `Z` suffix.
+Enums are stored as integers in the database (`GrantStatus`: `Open = 0`, `Closed = 1`; `TaskPriority`: `Low = 1`, `Medium = 2`, `High = 3`), but serialised as strings in JSON/API DTOs (`"Open"`, `"Closed"`, `"Low"`, `"Medium"`, `"High"`). `GrantTaskStatus` enum used in DTOs and domain logic is also mapped to strings (`"Pending"`, `"Completed"`, `"Cancelled"`). `DateOnly` is serialised as `"YYYY-MM-DD"`. `DateTime` values are ISO 8601 UTC with a `Z` suffix; the UTC converter (§3.6) makes sure values read from SQLite keep it. The UI treats `"YYYY-MM-DD"` values as plain text: it never turns them into a JavaScript `Date`, which would read them as midnight UTC and show the previous day in time zones west of UTC.
 
 ### 5.1 Error handling
 
@@ -458,6 +481,30 @@ Edge cases for repeated requests and health checks are in §6.5.
 
 Seeded at start-up. Due dates are relative to `today` (Sydney), so the overdue logic can always be demonstrated (§8 of CONTEXT). The seeder runs only if the database is empty, so it's idempotent.
 
+**The same every time.** Everything in the seed is fixed except `today`. In the running app, `today` is the start-up date, as the spec requires. In tests, the clock is pinned (§9), so the seed is identical on every run.
+
+| Field | Value | Why |
+|---|---|---|
+| Ids | Fixed Guids. Grants: `00000000-0000-0000-0000-000000100001` to `...100004`, matching the reference. Tasks: `00000000-0000-0000-0001-000000000001` to `...000006`, in the order of the table in CONTEXT §8. | Tests, the demo and Swagger calls can use known ids. |
+| `Version` | A fixed Guid per row | Same every run |
+| Time of day | Every seeded timestamp is **09:00 Sydney** on its date, converted with the configured time zone (never a hard-coded offset). | 09:00 Sydney is 22:00 or 23:00 UTC on the **previous day**. Code that wrongly used the UTC date would show every seeded date one day early, and the tests would catch it. |
+| Task `CreatedAtUtc` | The grant's application date, 09:00 Sydney | Every seeded due date is on or after it, so it agrees with BR-2. |
+| `CompletedAtUtc` | Check eligibility documents (due `today − 50`): `today − 52`. Final acquittal review (due `today − 150`): `today − 151`. | Completed shortly before the due date. Neither is overdue. |
+| GR-100003 `ClosedAtUtc` | `today − 145` | After its only task was completed |
+| GR-100003 `ClosedNote` | `null` | The spec gives none, and the note is optional. |
+| `CancelledAtUtc` | None | The spec's seed has no cancelled tasks. |
+
+With the test clock (`today` = 2026-03-11), for example:
+
+| Seeded value | Sydney | Stored UTC |
+|---|---|---|
+| GR-100001 tasks `CreatedAtUtc` (`today − 60`) | 2026-01-10 09:00 AEDT | `2026-01-09T22:00:00Z` |
+| Check eligibility documents `CompletedAtUtc` (`today − 52`) | 2026-01-18 09:00 AEDT | `2026-01-17T22:00:00Z` |
+| GR-100003 `ClosedAtUtc` (`today − 145`) | 2025-10-17 09:00 AEDT | `2025-10-16T22:00:00Z` |
+| GR-100003 task `CreatedAtUtc` (`today − 200`) | 2025-08-23 09:00 AEST | `2025-08-22T23:00:00Z` |
+
+The seed covers both Sydney offsets: daylight saving time (UTC+11) and standard time (UTC+10).
+
 | Grant | Demonstrates |
 |---|---|
 | GR-100001 | Overdue High task (BR-6). Close blocked by a pending High task (BR-5). A completed High task that doesn't block. |
@@ -475,11 +522,14 @@ The spec's seed has no Cancelled task. GR-100003 only has a completed task, so t
 
 Tests never depend on the real date, the machine's time zone, or test order.
 
+**Catching an accidental switch to UTC.** The API tests pin `FakeTimeProvider` to **`2026-03-10T22:00:00Z`**, which is **2026-03-11 09:00 in Sydney**. At that instant the UTC date (10 March) and the Sydney date (11 March) differ, and so do the seeded timestamps (§8). Tests assert **literal** dates and instants (for example `today` is `"2026-03-11"`, and GR-100003 `closedAtUtc` is `"2025-10-16T22:00:00Z"`), never values computed with the code under test. If the code used the UTC date anywhere, `today` and the seeded dates would all shift by one day together, and only literal expectations catch that. The UI tests run with the time zone set to `America/Los_Angeles`, so code that turns a `"YYYY-MM-DD"` value into a JavaScript `Date` shows the wrong day and fails.
+
 | Level | Location | What | How |
 |---|---|---|---|
 | Domain unit | `tests/GrantTracker.Tests/Domain/` | BR-1 to BR-6, the read-only rule, derived status, every boundary in §7 | Plain objects. `today`/`nowUtc` passed as fixed values. No database, no DI. |
 | Clock unit | `tests/GrantTracker.Tests/Api/` | `IAppClock.Today` in Sydney, across midnight and DST | `FakeTimeProvider` |
-| API integration | `tests/GrantTracker.Tests/Api/` | Endpoints, status codes, ProblemDetails shape, seed scenarios, safe repeats (including task creation), retry on conflict, health checks, check constraint | `WebApplicationFactory` + SQLite in-memory (one open connection per test, so each test gets its own fresh database) + `FakeTimeProvider` pinned to a fixed instant |
+| Infrastructure | `tests/GrantTracker.Tests/Infrastructure/` | Check constraint, version renewal and conflicts, query expressions, enum sort order, date storage and the UTC converter (§3.6), seed data | SQLite in-memory with the real migrations applied, one database per test |
+| API integration | `tests/GrantTracker.Tests/Api/` | Endpoints, status codes, ProblemDetails shape, seed scenarios, safe repeats (including task creation), retry on conflict, health checks | `WebApplicationFactory` + SQLite in-memory (one open connection per test, so each test gets its own fresh database) + `FakeTimeProvider` pinned to `2026-03-10T22:00:00Z` |
 | UI component | `ui/src/`, next to the components | A few behaviours that matter most: API errors shown, the server-problem banner, safe resending, overdue highlighting | Vitest + React Testing Library (jsdom). `fetch` is mocked. Fake timers drive the 10-second timeout, so tests don't wait. Dates come from the mocked API's `today`, not the browser clock. |
 
 ### 9.1 Key scenarios
@@ -487,6 +537,12 @@ Tests never depend on the real date, the machine's time zone, or test order.
 **BR-2 / BR-3**
 - Due date at both boundaries (today, ApplicationDate), and one day either side.
 - Title: 100 / 101 characters after trimming, whitespace-only, padded.
+- A closed grant with an invalid title → BR-1 (checked first). An invalid title and an invalid due date → one 400 with both field errors.
+
+**Dates in the database (§3.6)**
+- A UTC instant saved and read back keeps its value and comes back marked UTC. The API returns it with `Z`.
+- Saving a non-UTC `DateTime` fails.
+- `DateOnly` is stored as zero-padded `'YYYY-MM-DD'` text, and `DueDate < today` in SQL is correct across month and year ends.
 
 **BR-4**
 - Complete, advance the fake clock, complete again → same `CompletedAtUtc`, 200.
