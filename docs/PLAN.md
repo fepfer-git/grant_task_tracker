@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Part 0 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Part 0 reviewed; Part 1 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -79,8 +79,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 
 | Part | Title | Status |
 |---|---|---|
-| 0 | Repository scaffolding | Built, waiting for review |
-| 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Not started |
+| 0 | Repository scaffolding | Built, reviewed |
+| 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Built, waiting for review |
 | 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Not started |
 | 3 | Clock: "today" in Sydney | Not started |
 | 4 | Infrastructure: database, dates, versions, seed data | Not started |
@@ -199,14 +199,64 @@ Changes from the plan:
 | Remove `Trim()` | `Given_TaskTitleOf100CharactersAfterTrimming...` (padded case), `..._Then_TitleIsStoredTrimmed` |
 | Stop at the first field error | `Given_InvalidTaskTitleAndInvalidDueDate_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-12.
+
+What was built (`src/GrantTracker.Domain/`):
+
+| File | What it holds |
+|---|---|
+| `GrantStatus.cs`, `TaskPriority.cs`, `GrantTaskStatus.cs` | The enums, with explicit values: `Open = 0`, `Closed = 1`; `Low = 1`, `Medium = 2`, `High = 3`; `Pending = 0`, `Completed = 1`, `Cancelled = 2`. `GrantTaskStatus` is never stored, so its values have no meaning outside the code. |
+| `Grant.cs` | All the §3.1 fields, with private setters. `Tasks` is a read-only view of a private list. The constructor `(id, reference, organisationName, applicationDate)` creates an open grant with a new `Version`. Its parameter names match the properties, so EF Core can use it in Part 4. |
+| `Grant.AddTask(id, title, dueDate, priority, today, nowUtc)` | 1. BR-1: a closed grant throws `BusinessRuleException("BR-1")`. 2. The title is trimmed (`null` counts as empty). 3. BR-3 and BR-2 are both checked, and every message is collected per field: `title` gets "Title is required." or "Title must be 100 characters or fewer."; `dueDate` gets "Due date cannot be in the past." and/or "Due date cannot be before the grant's application date.". 4. Any errors → one `DomainValidationException`. 5. Otherwise the task is created with `CreatedAtUtc = nowUtc`, added and returned. |
+| `GrantTask.cs` | All the §3.2 fields, with private setters, and `TitleMaxLength = 100`. The constructor is `internal`, so tasks are created only through `Grant.AddTask`. `Status` is derived from `CompletedAtUtc` and `CancelledAtUtc` (§3.3). |
+| `BusinessRuleException.cs` | `Code` (becomes the ProblemDetails `type`) and a message. The constant `Br1GrantClosed = "BR-1"`. |
+| `DomainValidationException.cs` | `Errors`: field name → messages, keyed `title` and `dueDate`. |
+
+Tests (`tests/GrantTracker.Tests/Domain/GrantAddTaskTests.cs`): 12 tests, 14 cases. `today` is 2026-03-11 and `nowUtc` is `2026-03-10T22:00:00Z`, both written as literals.
+
+| Test | What it checks | Covers |
+|---|---|---|
+| `Given_OpenGrantAndValidInput_When_AddingTask_Then_TaskIsPendingWithCreatedAtUtcSet` | The task is in `grant.Tasks` with the given id, grant id, title, due date and priority. Status is Pending, `CreatedAtUtc` is `2026-03-10T22:00:00Z`, and the completed and cancelled times are null. | Happy path |
+| `Given_ClosedGrant_When_AddingTask_Then_ThrowsBr1` | Code `"BR-1"`, and no task is added | BR-1 |
+| `Given_ClosedGrantAndInvalidTaskTitle_When_AddingTask_Then_ThrowsBr1` | An empty task title on a closed grant gives `"BR-1"`, not a title error | BR-1 checked first (§4 order of checks) |
+| `Given_DueDateToday_When_AddingTask_Then_TaskIsAdded` | Due 2026-03-11 is accepted | BR-2: the "today" boundary |
+| `Given_DueDateYesterday_When_AddingTask_Then_ThrowsValidationOnDueDate` | Due 2026-03-10: exactly one error, on `dueDate`. No task added. | BR-2: not in the past |
+| `Given_DueDateEqualToApplicationDate_When_AddingTask_Then_TaskIsAdded` | Application date and due date both 2026-03-16, which is after today, so only this rule applies. Accepted. | BR-2: the application-date boundary |
+| `Given_DueDateOneDayBeforeApplicationDate_When_AddingTask_Then_ThrowsValidationOnDueDate` | Application date 2026-03-16 and due date 2026-03-15 (not in the past): one error on `dueDate` | BR-2: not before the application date |
+| `Given_EmptyOrWhitespaceTaskTitle_When_AddingTask_Then_ThrowsValidationOnTitle` (`""`, `"   "`) | One error, on `title`. No task added. | BR-3: title required |
+| `Given_TaskTitleOf100CharactersAfterTrimming_When_AddingTask_Then_TaskIsAdded` (0 and 2 spaces on each side) | Accepted, and the stored title is 100 characters | BR-3: the 100 boundary, counted after trimming |
+| `Given_TaskTitleOf101CharactersAfterTrimming_When_AddingTask_Then_ThrowsValidationOnTitle` | One error, on `title` | BR-3: over the limit |
+| `Given_TaskTitleWithSurroundingSpaces_When_AddingTask_Then_TitleIsStoredTrimmed` | `"  Verify bank details  "` is stored as `"Verify bank details"` | BR-3 / §7: stored trimmed |
+| `Given_InvalidTaskTitleAndInvalidDueDate_When_AddingTask_Then_BothFieldErrorsAreReported` | An empty title and a due date of yesterday give errors on both `dueDate` and `title` | BR-2 and BR-3 reported together (§4 order of checks) |
+
+Mutation checks. Each was applied to `Grant.cs`, all tests were run, and the file was restored. Checks 8 and 9 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | `dueDate < today` → `dueDate <= today` | `Given_DueDateToday_..._Then_TaskIsAdded` |
+| 2 | Remove the application-date check | `Given_DueDateOneDayBeforeApplicationDate_...` |
+| 3 | Remove the BR-1 check | `Given_ClosedGrant_..._Then_ThrowsBr1`, `Given_ClosedGrantAndInvalidTaskTitle_..._Then_ThrowsBr1` |
+| 4 | Check BR-3 before BR-1 (an empty title throws before the closed check) | `Given_ClosedGrantAndInvalidTaskTitle_..._Then_ThrowsBr1`, `Given_InvalidTaskTitleAndInvalidDueDate_...` |
+| 5 | Limit `100` → `101` | `Given_TaskTitleOf101CharactersAfterTrimming_...` |
+| 6 | Remove `Trim()` | `Given_TaskTitleOf100CharactersAfterTrimming_...` (2 spaces), `Given_TaskTitleWithSurroundingSpaces_...`, `Given_EmptyOrWhitespaceTaskTitle_...` (`"   "`) |
+| 7 | Throw as soon as the title is invalid, without checking the due date | `Given_InvalidTaskTitleAndInvalidDueDate_...` |
+| 8 | `dueDate < ApplicationDate` → `dueDate <= ApplicationDate` | `Given_DueDateEqualToApplicationDate_..._Then_TaskIsAdded` |
+| 9 | Remove the past-date check | `Given_DueDateYesterday_...`, `Given_InvalidTaskTitleAndInvalidDueDate_...` |
+
+Checks 2 and 9 were first written as `if (false)`. That didn't compile, because unreachable code is a warning and warnings are errors. They were re-run with a condition that is never true (`dueDate < DateOnly.MinValue`).
+
+After restoring, `npm test` passed twice: 14 passed, 0 failed.
+
+Changes from the plan:
+- **A minimal `Grant.Close(note, nowUtc)` was built in Part 1.** The BR-1 tests need a closed grant, and the plan only built `Close` in Part 2. It sets `Status = Closed`, `ClosedAtUtc` and the note (trimmed, and empty becomes `null`). It has no tests of its own yet. Part 2 adds the repeat no-op, BR-5 and cancelling pending tasks, with their tests. The alternative was to set the private status by reflection in the tests, which would test a state the code can't otherwise reach.
+- **`GrantTask.Status` was built in Part 1, not Part 2,** because the happy-path test checks that a new task is Pending. Part 2 still adds its Theory over all three states.
 
 ---
 
 ### Part 2: Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7)
 
 **Builds:**
-- `GrantTask.Status`, derived from the two timestamps (§3.3).
+- `GrantTask.Status`, derived from the two timestamps (§3.3). _Already built in Part 1; Part 2 adds its tests._
 - `GrantTask.Complete(nowUtc)` (§4 BR-4 table).
 - `GrantTask.IsOverdue(today)`.
 - `Grant.Close(note, nowUtc)`, which cancels pending tasks (§4 BR-5).
