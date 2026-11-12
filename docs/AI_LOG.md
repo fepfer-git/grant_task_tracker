@@ -56,6 +56,7 @@
 | `DESIGN.md` §3.2 and BR-3 said the database's max length on `Title` is a second line of defence. | SQLite doesn't enforce maximum lengths, so the claim was false for this app. I found it while planning Part 4; the user confirmed the correction. | The design text now says the domain is the only length check on SQLite, and PostgreSQL or SQL Server would enforce the column lengths. |
 | API tests pinned the fake clock to `2026-03-11T01:00:00Z` (Sydney 12:00), and the seed data had no timestamps defined. | At that instant the UTC date and the Sydney date are the same, so if the code were accidentally changed to use the UTC date, only the Part 3 clock tests would notice. The user asked for times where the UTC date and the Sydney date differ, so every level catches that regression. | The fake clock is pinned to `2026-03-10T22:00:00Z` (Sydney 2026-03-11 09:00). Every seeded timestamp is 09:00 Sydney, which is the previous day in UTC. Tests assert literal dates and instants, never values computed with the code under test. |
 | Test names such as `Given_ClosedGrantAndInvalidTitle_When_AddingTask_Then_ThrowsBr1`, using `Title` for the task's title. | The user pointed out that `InvalidTitle` next to `ClosedGrant` can be read as the grant's title. | Every test name that refers to the task's title now says `TaskTitle` (for example `Given_ClosedGrantAndInvalidTaskTitle_When_AddingTask_Then_ThrowsBr1`). A naming rule was added to the plan's test conventions. |
+| Part 0: fix the failing `dotnet test` (xUnit v3 4.x needs Microsoft.Testing.Platform on the .NET 10 SDK) by adding a `global.json` that opts into that platform and pins the SDK. Before asking, I also tried switching xUnit to VSTest mode with `UseMicrosoftTestingPlatformRunner=false`, which didn't work and was reverted. | The user rejected the `global.json`. | xUnit v3 was downgraded to 3.2.2 and `xunit.runner.visualstudio` to 3.1.5, which run through VSTest with no extra file (PLAN Decision 11). |
 | The plan's coverage map labelled each rule with a short name (for example "BR-1 No task on a closed grant"). | The user asked for the full text of each rule and need, so the map can be checked against the spec without switching files. | The coverage map now quotes each BR and OP in full, and summarises the two design rules (§4.7, §3.6). |
 
 ## Prompt log
@@ -136,3 +137,7 @@
 >
 >
 > Also please explain this test: "Given_ClosedGrantAndInvalidTitle_When_AddingTask_Then_ThrowsBr1" does the InvalidTitle here is the title of the Task? If it is, please update the name as it can be miss-understand to title of the grant.
+
+### 2026-11-12 17:40 (+07:00)
+
+> Yes. the plan is approve, please start with the implementation for Part 0.

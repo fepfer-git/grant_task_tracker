@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domain references nothing (DESIGN.md §2). -->
+
+</Project>

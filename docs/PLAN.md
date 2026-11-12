@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Proposed (revision 2), waiting for approval.** No code has been written.
+**Status: Approved (revision 2) on 2026-11-12. In progress: Part 0 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -45,7 +45,7 @@ A part is Built only when all of these are true:
 
 | Purpose | Tool |
 |---|---|
-| .NET tests | xUnit v3, with its built-in `Assert` |
+| .NET tests | xUnit v3 (3.x line, run through VSTest by `dotnet test`), with its built-in `Assert`. See Decision 11. |
 | Fake clock | `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |
 | API tests | `WebApplicationFactory` (`Microsoft.AspNetCore.Mvc.Testing`) with SQLite in-memory |
 | UI tests | Vitest, React Testing Library, `@testing-library/user-event`, jsdom |
@@ -79,7 +79,7 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 
 | Part | Title | Status |
 |---|---|---|
-| 0 | Repository scaffolding | Not started |
+| 0 | Repository scaffolding | Built, waiting for review |
 | 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Not started |
 | 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Not started |
 | 3 | Clock: "today" in Sydney | Not started |
@@ -116,7 +116,42 @@ Parts 0 to 8, 10 and 11 cover what the spec requires. Parts 9 and 12 are spec ex
 
 **Mutation checks:** none.
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-12.
+
+What was built:
+
+| File | What it holds |
+|---|---|
+| `GrantTracker.slnx` | The solution, with folders `src/` and `tests/`. The .NET 10 SDK creates the XML `.slnx` format by default. |
+| `Directory.Build.props` | Settings shared by every project: `net10.0`, nullable reference types, implicit usings and `TreatWarningsAsErrors`. The project files don't repeat them. |
+| `src/GrantTracker.Domain/GrantTracker.Domain.csproj` | No references and no packages. |
+| `src/GrantTracker.Infrastructure/GrantTracker.Infrastructure.csproj` | References Domain. The EF Core packages come in Part 4. |
+| `src/GrantTracker.Api/` | References Domain and Infrastructure. `Program.cs` only adds and maps controllers. The error handler, clock, database and health checks come in Parts 3 to 8. `appsettings*.json` and `Properties/launchSettings.json` are as the template created them (`http` profile on port 5038). |
+| `tests/GrantTracker.Tests/GrantTracker.Tests.csproj` | References all three projects. Packages: `xunit.v3` 3.2.2, `xunit.runner.visualstudio` 3.1.5 and `Microsoft.NET.Test.Sdk` 18.12.0. `using Xunit;` is global. |
+| `dotnet-tools.json` | The local tool manifest, with `dotnet-ef` 10.0.15. The .NET 10 SDK puts the manifest at the repository root, not in `.config/`. |
+| `package.json` | `npm test` runs `dotnet test GrantTracker.slnx`. Vitest is added in Part 10. |
+| `.gitignore` | Adds `bin/`, `obj/`, `node_modules/` and `*.db`, plus SQLite's side files `*.db-shm` and `*.db-wal`. |
+
+Removed from the templates:
+- The sample `WeatherForecast` controller and model, and the `.http` file.
+- `Class1.cs` in both class libraries.
+- The `Microsoft.AspNetCore.OpenApi` package. It's added back in Part 9.
+- `UseHttpsRedirection` and `UseAuthorization`. The app has no login, and the development profile uses HTTP.
+
+How it was checked:
+
+| Check | Result |
+|---|---|
+| `dotnet build GrantTracker.slnx --no-incremental` | 0 warnings, 0 errors. |
+| `dotnet list reference` on each project | Domain: none. Infrastructure: Domain. Api: Domain and Infrastructure. Tests: all three. |
+| `npm test` | Exits 0 with "No test is available", because there are no tests yet. |
+| A throwaway test file with one passing and one failing `[Fact]`, deleted afterwards | xUnit found both tests. `npm test` reported 1 passed and 1 failed, and exited 1, so the command fails when a test fails. |
+| A throwaway unused variable in Domain, deleted afterwards | The build failed with CS0219 as an error, so warnings are treated as errors. |
+
+Changes from the plan:
+- **xUnit v3 is on the 3.x line, not the latest 4.x.** xUnit v3 4.x runs only on Microsoft.Testing.Platform. The .NET 10 SDK's `dotnet test` uses that platform only if the repository opts in through a `global.json`. You chose to stay on 3.x, which still runs through VSTest, rather than add a `global.json` (Decision 11).
+- **`dotnet-ef` is pinned to 10.0.15.** By default the install picked 11.0.0, which belongs to EF Core 11 rather than the EF Core 10 this project uses.
+- **`.gitignore` also ignores `*.db-shm` and `*.db-wal`,** which SQLite creates next to the database file.
 
 ---
 
@@ -669,3 +704,4 @@ Made on 2026-11-12:
 8. The seed is the same every run, apart from `today`: fixed ids and versions, and every timestamp at 09:00 Sydney (§8).
 9. API tests pin the clock to `2026-03-10T22:00:00Z`, where the UTC date and the Sydney date differ, and assert literal dates (§9).
 10. A UTC converter on every `DateTime` property marks values read from SQLite as UTC and refuses non-UTC values (§3.6).
+11. xUnit v3 stays on the 3.x line (3.2.2) and runs through VSTest, so plain `dotnet test` works without a `global.json`. Moving to 4.x would need a `global.json` that opts into Microsoft.Testing.Platform (Part 0).

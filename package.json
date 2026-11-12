@@ -1,0 +1,7 @@
+{
+  "name": "grant-task-tracker",
+  "private": true,
+  "scripts": {
+    "test": "dotnet test GrantTracker.slnx"
+  }
+}
