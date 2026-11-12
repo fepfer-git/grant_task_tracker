@@ -305,7 +305,7 @@ Enums are stored as integers in the database (`GrantStatus`: `Open = 0`, `Closed
 
 One exception-handling middleware, using ASP.NET Core's `UseExceptionHandler` + `IExceptionHandler` + `AddProblemDetails`, catches everything thrown by controllers and services and writes an RFC 9457 body:
 
-| Exception | Status | `type` / `code` | `title` |
+| Exception | Status | `code` | `title` |
 |---|---|---|---|
 | Model binding or validation failure, BR-2, BR-3 | 400 | `validation` | "One or more validation errors occurred." + `errors{field: [...]}` |
 | `NotFoundException` | 404 | `not-found` | "Grant not found" / "Task not found" |
@@ -316,7 +316,13 @@ One exception-handling middleware, using ASP.NET Core's `UseExceptionHandler` + 
 | `DbUpdateConcurrencyException` after 3 attempts (§6.2) | 409 | `concurrency-conflict` | "The record was changed by someone else. Reload and try again." |
 | Anything else | 500 | `internal` | "An unexpected error occurred." No exception details in the body. |
 
-Every body includes `status`, `title`, `detail`, `instance` (the request path) and `traceId`. `traceId` isn't part of RFC 9457; it's an extension field that ASP.NET Core adds. The UI reads `title`/`detail` for messages and `errors` for field errors.
+**`type` and `code`.** Each error has a short `code` from the table above, sent as an extension field. Its `type` is an absolute URI built from the code: `https://granttracker.example/problems/<code>`, for example `"type": "https://granttracker.example/problems/BR-1", "code": "BR-1"`.
+- RFC 9457 recommends an absolute URI for `type`. A short relative value such as `BR-1` would be resolved against the request URL and mean nothing.
+- `.example` is reserved for documentation (RFC 2606), so the URI can never point at someone else's site. Nothing is published there; see §10.8.
+- The UI and the tests switch on `code`, the short and stable value. `type` and `code` always correspond one to one.
+- Error bodies that ASP.NET Core writes itself (model validation, a route that doesn't match) get the same `type` and `code` for 400, 404 and 500. Any other status the framework produces (for example 405 or 415) keeps its default RFC link and has no `code`.
+
+Every body includes `type`, `code`, `status`, `title`, `detail`, `instance` (the request path) and `traceId`. `code` and `traceId` aren't part of RFC 9457; they're extension fields (`traceId` is added by ASP.NET Core). The UI reads `code` to decide what happened, `title`/`detail` for messages, and `errors` for field errors.
 
 Expected outcomes don't use exceptions: "already completed", "already closed" and "task already created" are normal 200 paths.
 
@@ -664,3 +670,9 @@ The spec mentions officers working in several regional offices (§2, OP-2), but 
   - **Daily counts** come from the database, using the existing `CreatedAtUtc` and `CompletedAtUtc` columns, grouped by the Sydney date. They would be shown through a read-only report endpoint or a dashboard. In-process counters are not used: they reset when a copy restarts and are split across copies.
   - **Overdue-list speed:** ASP.NET Core already records the `http.server.request.duration` metric, tagged with the route. Export it with OpenTelemetry to a monitoring tool (for example Prometheus and Grafana, or Azure Monitor), chart the 95th percentile for `GET /tasks/overdue`, and alert when it crosses a threshold. This needs monitoring infrastructure outside this repository.
   - The filtered `DueDate` index on pending tasks (§3.4) keeps the overdue query in proportion to pending tasks, not all tasks ever created.
+
+### 10.8 Problem `type` URIs don't lead to documentation (limitation, not built)
+- **Situation:** RFC 9457 makes `type` the problem type's identifier. When it's an `http` or `https` URI, the RFC says opening it SHOULD show human-readable documentation for the problem, and that clients MUST use `type` as the primary identifier. Our `type` values are `https://granttracker.example/problems/<code>` (§5.1). Nothing is published at that address, and the UI identifies errors by the `code` extension field instead of `type`.
+- **Decision:** Keep the placeholder URIs and the `code` field, and don't build documentation pages in this version. Following the RFC fully means hosting a page for every problem type, which is outside the scope of this exercise.
+- **Why it's acceptable for now:** `.example` is reserved for documentation (RFC 2606), so the address can never lead to someone else's site. Clients are told not to open `type` URIs automatically anyway. `type` and `code` are built from the same value and always correspond one to one, so identifying by `code` gives the same answer as identifying by `type`.
+- **The ideal way:** Publish our own help page for each problem type (for example `https://<our docs site>/problems/BR-1`) explaining what happened and what the officer can do, and change the base URI to that site. The `code` values and the UI wouldn't need to change.

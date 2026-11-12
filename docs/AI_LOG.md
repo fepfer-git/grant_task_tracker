@@ -59,6 +59,12 @@
 | Part 0: fix the failing `dotnet test` (xUnit v3 4.x needs Microsoft.Testing.Platform on the .NET 10 SDK) by adding a `global.json` that opts into that platform and pins the SDK. Before asking, I also tried switching xUnit to VSTest mode with `UseMicrosoftTestingPlatformRunner=false`, which didn't work and was reverted. | The user rejected the `global.json`. | xUnit v3 was downgraded to 3.2.2 and `xunit.runner.visualstudio` to 3.1.5, which run through VSTest with no extra file (PLAN Decision 11). |
 | The plan's coverage map labelled each rule with a short name (for example "BR-1 No task on a closed grant"). | The user asked for the full text of each rule and need, so the map can be checked against the spec without switching files. | The coverage map now quotes each BR and OP in full, and summarises the two design rules (§4.7, §3.6). |
 
+### 2026-11-13: Part 5 (API read endpoints)
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Response DTOs named `GrantSummaryDto` (a row of `GET /grants`) and `GrantDetailDto` (`GET /grants/{id}`). | The user said the names don't reflect their purpose. | Renamed to `GrantListItemDto` and `GrantDto` (files and types). The JSON shapes are unchanged. |
+
 ## Prompt log
 
 ### 2026-11-11 01:49 (+07:00)
@@ -157,3 +163,19 @@
 ### 2026-11-13 01:24 (+07:00)
 
 > I approve this. please move to the next part
+
+### 2026-11-13 01:58 (+07:00)
+
+> Part 4 approved. Please move forward with part 5
+
+### 2026-11-13 02:35 (+07:00)
+
+> Please help me rename the: GrantSummaryDto and GrantDetailDto, the naming is not really reflect the purpose. Name it to something liek: GrantListItemDto and GrantDto.
+>
+> In the problem detail: there is an URL for the type: private const string RfcTypePrefix = "https://tools.ietf.org/";. I understand that follow RFC9457, the type should be url or blank, but what if we have a custom error? Can we override this? Or it get the https://tools.ietf.org/ link as well? Please consider this. 
+>
+> The rest look good to me
+
+### 2026-11-13 02:40 (+07:00)
+
+> Go with C first. Mark this as limitation as it will violate the RFC 9457. Note that the ideal way is to create our own helper page. However we will not implement that.

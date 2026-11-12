@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 3 reviewed; Part 4 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 4 reviewed; Part 5 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -37,9 +37,9 @@ A part is Built only when all of these are true:
 | Expected values | Dates and instants are written as **literals** in the test (for example `"2026-03-11"`, `"2025-10-16T22:00:00Z"`), never computed with the code under test. Otherwise a bug in the date logic would shift the expected and the actual value together, and the test would still pass. |
 | UI time zone | Vitest runs with the time zone set to `America/Los_Angeles`, so treating a `"YYYY-MM-DD"` value as a JavaScript `Date` shows the wrong day and fails. |
 | Isolation | Each test creates its own data. API tests get their own app and database. No shared mutable state, so tests run in any order and in parallel. |
-| Assertions | xUnit's built-in `Assert`. Assert the outcome the rule cares about (status code, ProblemDetails `type`, field key, timestamps), not incidental details. |
+| Assertions | xUnit's built-in `Assert`. Assert the outcome the rule cares about (status code, ProblemDetails `code`, field key, timestamps), not incidental details. |
 
-**Which level tests what.** The domain tests cover every rule and every boundary. API tests check that each outcome reaches the client correctly (status code, ProblemDetails `type`, field key), with one test per outcome rather than repeating every boundary. UI tests cover only the few behaviours in §9.
+**Which level tests what.** The domain tests cover every rule and every boundary. API tests check that each outcome reaches the client correctly (status code, ProblemDetails `code`, field key), with one test per outcome rather than repeating every boundary. UI tests cover only the few behaviours in §9.
 
 **Tools:**
 
@@ -83,8 +83,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Built, reviewed |
 | 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Built, reviewed |
 | 3 | Clock: "today" in Sydney | Built, reviewed |
-| 4 | Infrastructure: database, dates, versions, seed data | Built, waiting for review |
-| 5 | API: read endpoints, errors, start-up | Not started |
+| 4 | Infrastructure: database, dates, versions, seed data | Built, reviewed |
+| 5 | API: read endpoints, errors, start-up | Built, waiting for review |
 | 6 | API: write endpoints (BR-1 to BR-5 through the API) | Not started |
 | 7 | OP-2 retry and OP-3 safe task creation | Not started |
 | 8 | OP-5 health checks | Not started |
@@ -209,7 +209,7 @@ What was built (`src/GrantTracker.Domain/`):
 | `Grant.cs` | All the §3.1 fields, with private setters. `Tasks` is a read-only view of a private list. The constructor `(id, reference, organisationName, applicationDate)` creates an open grant with a new `Version`. Its parameter names match the properties, so EF Core can use it in Part 4. |
 | `Grant.AddTask(id, title, dueDate, priority, today, nowUtc)` | 1. BR-1: a closed grant throws `BusinessRuleException("BR-1")`. 2. The title is trimmed (`null` counts as empty). 3. BR-3 and BR-2 are both checked, and every message is collected per field: `title` gets "Title is required." or "Title must be 100 characters or fewer."; `dueDate` gets "Due date cannot be in the past." and/or "Due date cannot be before the grant's application date.". 4. Any errors → one `DomainValidationException`. 5. Otherwise the task is created with `CreatedAtUtc = nowUtc`, added and returned. |
 | `GrantTask.cs` | All the §3.2 fields, with private setters, and `TitleMaxLength = 100`. The constructor is `internal`, so tasks are created only through `Grant.AddTask`. `Status` is derived from `CompletedAtUtc` and `CancelledAtUtc` (§3.3). |
-| `BusinessRuleException.cs` | `Code` (becomes the ProblemDetails `type`) and a message. The constant `Br1GrantClosed = "BR-1"`. |
+| `BusinessRuleException.cs` | `Code` (becomes the ProblemDetails `code`, and the end of its `type` URI) and a message. The constant `Br1GrantClosed = "BR-1"`. |
 | `DomainValidationException.cs` | `Errors`: field name → messages, keyed `title` and `dueDate`. |
 
 Tests (`tests/GrantTracker.Tests/Domain/GrantAddTaskTests.cs`): 12 tests, 14 cases. `today` is 2026-03-11 and `nowUtc` is `2026-03-10T22:00:00Z`, both written as literals.
@@ -595,7 +595,7 @@ Changes from the plan:
 | `Given_TasksWithSameDueDate_When_ListingOverdueTasks_Then_HigherPriorityFirstThenId` | BR-6 tie-breaking (§4) |
 | `Given_TaskDueToday_When_ClockPassesSydneyMidnight_Then_TaskAppearsInOverdueList` | BR-6 end to end with the Sydney clock |
 | `Given_UnhandledException_When_Requesting_Then_Returns500WithoutExceptionDetails` | §5.1. A test-only endpoint throws. |
-| `Given_AnyError_When_Returned_Then_BodyHasTypeTitleStatusDetailInstanceAndTraceId` | §5.1 consistent error body |
+| `Given_AnyError_When_Returned_Then_BodyHasTypeCodeTitleStatusDetailInstanceAndTraceId` | §5.1 consistent error body |
 | `Given_InvalidTimeZoneId_When_AppStarts_Then_StartupFails` | §4.0 fail fast |
 
 **Mutation checks:**
@@ -609,7 +609,88 @@ Changes from the plan:
 | Include exception details in the 500 body | `Given_UnhandledException_...` |
 | Skip time-zone validation at start-up | `Given_InvalidTimeZoneId_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built:
+
+| File | What it holds |
+|---|---|
+| `src/GrantTracker.Api/Program.cs` | Adds JSON enums as strings; `AddProblemDetails` with `ProblemTypes.ApplyDefaults`; `ApiExceptionHandler`; the DbContext from `ConnectionStrings:Default` (start-up fails if it isn't set); the `DatabaseInitializer` hosted service; `GrantQueryService`. Pipeline: `UseExceptionHandler`, `UseStatusCodePages` (so a route that doesn't match, such as a non-Guid id, also gets a ProblemDetails body), `MapControllers`. |
+| `src/GrantTracker.Api/appsettings.json` | `"ConnectionStrings": { "Default": "Data Source=granttracker.db" }` (`*.db` is already in `.gitignore`). |
+| `src/GrantTracker.Api/Startup/DatabaseInitializer.cs` | Hosted service: applies the migrations, then `SeedData.SeedAsync` with `IAppClock.Today` and the configured zone. An exception stops the app from starting. |
+| `src/GrantTracker.Api/Errors/ApiExceptionHandler.cs` | `NotFoundException` → 404 `not-found`. Anything else → logged, then 500 `internal`, "An unexpected error occurred.", with a fixed `detail` and nothing from the exception. Bodies are built with `ProblemTypes.Create`. The BR, validation, duplicate and concurrency mappings come in Parts 6 and 7, with their tests. |
+| `src/GrantTracker.Api/Errors/ProblemTypes.cs` | The codes `validation`, `not-found`, `internal`; `TypeFor(code)` = `https://granttracker.example/problems/<code>`; `Create(status, code, title, detail)`, which sets `type` and the `code` extension field together. `ApplyDefaults` runs for every ProblemDetails body (including the framework's own): for 400, 404 and 500 it replaces the framework's RFC link with our `type` and `code`, and it fills in `detail`, `instance` (the request path) and `traceId` when they're missing. Other framework statuses (for example 405) keep their RFC link and get no `code` (DESIGN.md §5.1). |
+| `src/GrantTracker.Api/Errors/NotFoundException.cs` | `Title` ("Grant not found") and the message as `detail`. |
+| `src/GrantTracker.Api/Contracts/*.cs` | The response shapes (see below): `GrantListItemDto` (one row of the grant list), `GrantDto` (one grant with its tasks), `TaskDto`, `OverdueTaskDto`. |
+| `src/GrantTracker.Api/Services/GrantQueryService.cs` | `ListGrantsAsync(status)`, `GetGrantAsync(id)`, `ListOverdueTasksAsync()`. No tracking. Pending counts and the overdue filter use `GrantTaskQueries` in SQL. |
+| `src/GrantTracker.Api/Controllers/GrantsController.cs`, `TasksController.cs` | `GET /grants?status=`, `GET /grants/{id:guid}`, `GET /tasks/overdue`. Thin: bind, call the service, return the DTO. |
+| `tests/GrantTracker.Tests/GrantTracker.Tests.csproj` | Adds `Microsoft.AspNetCore.Mvc.Testing` 10.0.15. |
+
+Response shapes. §5 names the required fields (`pendingTaskCount`, `today`, `status`, `isOverdue`, the grant reference and organisation on overdue items); the rest follow the data model in §3:
+
+| Endpoint | Fields |
+|---|---|
+| `GET /grants` (ordered by reference) | `id`, `reference`, `organisationName`, `applicationDate`, `status`, `closedAtUtc`, `pendingTaskCount` |
+| `GET /grants/{id}` | `id`, `reference`, `organisationName`, `applicationDate`, `status`, `closedNote`, `closedAtUtc`, `pendingTaskCount`, `today`, `tasks` (ordered by due date, then priority High first, then id) |
+| Each task | `id`, `grantId`, `title`, `dueDate`, `priority`, `status`, `isOverdue`, `createdAtUtc`, `completedAtUtc`, `cancelledAtUtc` |
+| `GET /tasks/overdue` | `id`, `grantId`, `grantReference`, `organisationName`, `title`, `dueDate`, `priority` |
+
+Test helpers (`tests/GrantTracker.Tests/Api/`):
+- `GrantTrackerApiFactory.cs`: `WebApplicationFactory<Program>` with one open in-memory SQLite connection per factory, replacing the app's DbContext options, and `FakeTimeProvider` pinned to `2026-03-10T22:00:00Z` (exposed as `Clock`). The app's own `DatabaseInitializer` migrates and seeds it, so tests run against the real start-up. Optional setting overrides (used for `App:TimeZoneId`). `UpdateDatabase` adds data directly, for states that no endpoint can create until Part 6. Also holds `ResponseJson`, which reads bodies as JSON so tests assert on the exact text the client gets.
+- `ThrowingTestController.cs`: the test-only endpoint `GET /test/throw`, added to the app only in tests.
+
+Tests: 13 tests, 18 cases.
+
+| File | Test | Covers |
+|---|---|---|
+| `GrantReadEndpointTests.cs` | `Given_SeedData_When_ListingGrants_Then_ReturnsAllGrantsWithPendingTaskCounts` (GR-100001: 2, GR-100002: 2, GR-100003: 0, GR-100004: 0) | §5 `pendingTaskCount`, Pending only (§7) |
+| `GrantReadEndpointTests.cs` | `Given_StatusFilter_When_ListingGrants_Then_ReturnsOnlyMatchingGrants` (Theory: Open → GR-100001, 100002, 100004; Closed → GR-100003) | §5 status filter |
+| `GrantReadEndpointTests.cs` | `Given_InvalidStatus_When_ListingGrants_Then_Returns400ProblemDetails` (`?status=Archived` → `type` `https://granttracker.example/problems/validation`, `code` `validation`, error keyed on `status`) | §5, §5.1 |
+| `GrantReadEndpointTests.cs` | `Given_PinnedClock_When_GettingGrant_Then_TodayIsSydneyDate` (`"2026-03-11"`) | §4.0 end to end |
+| `GrantReadEndpointTests.cs` | `Given_SeededGrant_When_GettingIt_Then_DatesAreLiteralSydneyDatesAndInstantsEndWithZ` (`applicationDate` `"2026-01-10"`, `dueDate` `"2026-03-08"`, `createdAtUtc` `"2026-01-09T22:00:00Z"`, GR-100003 `closedAtUtc` `"2025-10-16T22:00:00Z"`) | §3.6, §5 date serialisation, §8 seed |
+| `GrantReadEndpointTests.cs` | `Given_ExistingGrant_When_GettingIt_Then_TasksHaveStatusAndIsOverdue` (GR-100001: Check eligibility documents Completed/not overdue, Verify bank details Pending/overdue, Request quote for tools Pending/not overdue, in that order) | §5, BR-6 `isOverdue` |
+| `GrantReadEndpointTests.cs` | `Given_UnknownOrNonGuidId_When_GettingGrant_Then_Returns404ProblemDetails` (Theory: unknown Guid, `not-a-guid`; `type` `https://granttracker.example/problems/not-found`, `code` `not-found`) | §5.1, §7 |
+| `OverdueTasksEndpointTests.cs` | `Given_SeedData_When_ListingOverdueTasks_Then_MostOverdueFirstAndCompletedExcluded` (Verify bank details 2026-03-08, then Review progress report 2026-03-10, with grant reference and organisation) | BR-6 ordering and exclusion |
+| `OverdueTasksEndpointTests.cs` | `Given_TasksWithSameDueDate_When_ListingOverdueTasks_Then_HigherPriorityFirstThenId` (four tasks due 2026-03-09: High A (id …01), High B (…03), Medium, Low) | BR-6 tie-breaking |
+| `OverdueTasksEndpointTests.cs` | `Given_TaskDueToday_When_ClockPassesSydneyMidnight_Then_TaskAppearsInOverdueList` (due 2026-03-11: absent at `2026-03-11T12:59Z`, present at `13:00Z`) | BR-6 end to end with the Sydney clock |
+| `ErrorResponseTests.cs` | `Given_UnhandledException_When_Requesting_Then_Returns500WithoutExceptionDetails` (no message, exception type or class name in the body) | §5.1 |
+| `ErrorResponseTests.cs` | `Given_AnyError_When_Returned_Then_BodyHasTypeCodeTitleStatusDetailInstanceAndTraceId` (Theory: 400, 404 unknown id, 404 non-Guid, 500; literal `type` URI and `code` for each) | §5.1 consistent error body |
+| `StartupTests.cs` | `Given_InvalidTimeZoneId_When_AppStarts_Then_StartupFails` (`OptionsValidationException`, with `DatabaseInitializer` removed) | §4.0 fail fast |
+
+Mutation checks. Each was applied, all tests were run, and the file was restored. Checks 6b and 7 to 13 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | `AppClock.Today` uses the UTC date | `Given_PinnedClock_..._TodayIsSydneyDate`, `..._DatesAreLiteralSydneyDates...`, all three overdue tests, and the clock tests from Part 3 |
+| 2 | Remove the UTC converter | `..._InstantsEndWithZ`, and the Part 4 converter tests |
+| 3 | Overdue ordered by due date descending | `Given_SeedData_When_ListingOverdueTasks_...`, `Given_TasksWithSameDueDate_...` |
+| 4 | `pendingTaskCount` counts all tasks | `Given_SeedData_When_ListingGrants_...` |
+| 5 | Include exception details in the 500 body | `Given_UnhandledException_...` |
+| 6 | Skip time-zone validation at start-up (`ValidateOnStart` removed) | `Given_InvalidTimeZoneId_...` (see the note below) |
+| 6b | No time-zone validation at all | `Given_InvalidTimeZoneId_...` (start-up then fails with `TimeZoneNotFoundException`, not the clear options error) |
+| 7 | Status filter ignored | `Given_StatusFilter_...` (both cases) |
+| 8 | Overdue tie-break without priority | `Given_TasksWithSameDueDate_...` |
+| 9 | `isOverdue` always false | `Given_ExistingGrant_..._TasksHaveStatusAndIsOverdue` |
+| 10 | 404 keeps the framework's RFC link as `type` | `Given_UnknownOrNonGuidId_...` (`not-a-guid`) |
+| 11 | `instance` not filled in | `Given_AnyError_...` (all four cases) |
+| 12 | `UseStatusCodePages` removed | `Given_UnknownOrNonGuidId_...` (`not-a-guid`), `Given_AnyError_...` (`not-a-guid`) |
+| 13 | `NotFoundException` not mapped (falls through to 500) | `Given_UnknownOrNonGuidId_...` (unknown Guid), `Given_AnyError_...` (unknown Guid) |
+| 14 | `type` is the bare code, without the base URI | Every `type` assertion: `Given_AnyError_...` (all four cases), `Given_UnhandledException_...`, `Given_InvalidStatus_...`, `Given_UnknownOrNonGuidId_...` (both cases) |
+| 15 | `Create` doesn't send the `code` field | `Given_AnyError_...` (unknown Guid, 500), `Given_UnhandledException_...`, `Given_UnknownOrNonGuidId_...` (unknown Guid) |
+| 16 | The framework's own bodies get our `type` but no `code` | `Given_AnyError_...` (400, non-Guid), `Given_InvalidStatus_...`, `Given_UnknownOrNonGuidId_...` (`not-a-guid`) |
+
+Note on check 6: on the first run it **survived**. `DatabaseInitializer` reads the time-zone setting at start-up, so the app still failed with the same options error even without `ValidateOnStart`. The test now removes `DatabaseInitializer`, so only the options check can stop the app, and check 6 fails it. This matters for Part 8, where the health-check test starts the app without the database start-up.
+
+Change after review (2026-11-13, option C): the problem `type` is now an absolute URI, `https://granttracker.example/problems/<code>`, and every error body also carries the short `code` as an extension field (DESIGN.md §5.1). Nothing is published at that address; this is recorded as limitation §10.8. Checks 5 and 10 to 13 were re-run against the new code with the same results, and checks 14 to 16 were added. Afterwards all tests passed twice: 78 passed, 0 failed. The DTOs were also renamed after review: `GrantSummaryDto` → `GrantListItemDto`, `GrantDetailDto` → `GrantDto`.
+
+Manual check: `dotnet run` against a scratch database file migrated, seeded with Sydney's real date (`today` `"2026-11-13"`) and served the three endpoints. A non-Guid id returned the ProblemDetails 404. The scratch file was deleted.
+
+After restoring, `npm test` passed twice: 78 passed, 0 failed (60 from Parts 1 to 4, and 18 from Part 5).
+
+Changes from the plan:
+- The DTO fields and the order of a grant's tasks weren't spelled out in §5. They're listed above for review, and can be copied into §5 once agreed.
+- The exception handler maps only what Part 5 can test (404 and 500). The other §5.1 rows are added in Parts 6 and 7, with the tests that prove them.
+- The start-up test removes `DatabaseInitializer` (see the note on check 6).
 
 ---
 
@@ -621,9 +702,9 @@ Changes from the plan:
   - `PUT /tasks/{id}/complete`.
   - `PUT /grants/{id}/close`, with an optional `note`.
 - Input-shape validation: `id` missing or `Guid.Empty`, an unknown priority, or a malformed date (§6.3 step 1).
-- Mapping of each exception to the §5.1 status and `type`.
+- Mapping of each exception to the §5.1 status, `type` URI and `code`.
 
-**Done when:** each rule outcome reaches the client with the right status code, `type` and field key. Boundaries were already tested in Parts 1 and 2.
+**Done when:** each rule outcome reaches the client with the right status code, `code` and field key. Boundaries were already tested in Parts 1 and 2.
 
 **Tests** (`tests/GrantTracker.Tests/Api/`; the clock is pinned, so `today` is 2026-03-11):
 
@@ -927,3 +1008,7 @@ Made on 2026-11-12:
 9. API tests pin the clock to `2026-03-10T22:00:00Z`, where the UTC date and the Sydney date differ, and assert literal dates (§9).
 10. A UTC converter on every `DateTime` property marks values read from SQLite as UTC and refuses non-UTC values (§3.6).
 11. xUnit v3 stays on the 3.x line (3.2.2) and runs through VSTest, so plain `dotnet test` works without a `global.json`. Moving to 4.x would need a `global.json` that opts into Microsoft.Testing.Platform (Part 0).
+
+Made on 2026-11-13:
+
+12. Problem `type` values are absolute URIs, `https://granttracker.example/problems/<code>`, with the short code in a `code` extension field that the UI and tests switch on (DESIGN.md §5.1). No documentation pages are published at those URIs; this is a recorded limitation (DESIGN.md §10.8).
