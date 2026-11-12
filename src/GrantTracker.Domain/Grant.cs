@@ -72,20 +72,49 @@ public class Grant
             throw new DomainValidationException(errors);
         }
 
-        var task = new GrantTask(id, Id, trimmedTitle, dueDate, priority, nowUtc);
+        var task = new GrantTask(this, id, trimmedTitle, dueDate, priority, nowUtc);
         _tasks.Add(task);
         return task;
     }
 
     /// <summary>
-    /// Closes the grant. Part 1 of the build plan adds only this basic effect, which the BR-1 tests need.
-    /// Part 2 adds the repeat no-op, BR-5 and cancelling pending tasks (DESIGN.md BR-5).
+    /// Closes the grant (DESIGN.md BR-5):
+    /// already closed → no change (the note, <see cref="ClosedAtUtc"/> and the tasks stay as they are);
+    /// any pending High-priority task → BR-5, and nothing changes;
+    /// otherwise the grant is closed and every pending task is cancelled at the same instant.
     /// </summary>
+    /// <param name="note">Optional. Trimmed; empty or whitespace becomes <c>null</c>.</param>
+    /// <exception cref="BusinessRuleException">
+    /// BR-5, with the blocking task ids in <see cref="BusinessRuleException.BlockingTaskIdsKey"/>.
+    /// </exception>
     public void Close(string? note, DateTime nowUtc)
     {
+        if (Status == GrantStatus.Closed)
+        {
+            return;
+        }
+
+        var blockingTaskIds = _tasks
+            .Where(t => t.Status == GrantTaskStatus.Pending && t.Priority == TaskPriority.High)
+            .Select(t => t.Id)
+            .ToArray();
+
+        if (blockingTaskIds.Length > 0)
+        {
+            throw new BusinessRuleException(
+                BusinessRuleException.Br5PendingHighTasks,
+                "A grant can't be closed while it has pending High-priority tasks.",
+                new Dictionary<string, object?> { [BusinessRuleException.BlockingTaskIdsKey] = blockingTaskIds });
+        }
+
         Status = GrantStatus.Closed;
         ClosedAtUtc = nowUtc;
         ClosedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+
+        foreach (var task in _tasks.Where(t => t.Status == GrantTaskStatus.Pending))
+        {
+            task.Cancel(nowUtc);
+        }
     }
 
     /// <summary>BR-3: required, and at most 100 characters after trimming.</summary>

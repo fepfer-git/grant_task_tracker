@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Part 0 reviewed; Part 1 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 and 1 reviewed; Part 2 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -80,8 +80,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | Part | Title | Status |
 |---|---|---|
 | 0 | Repository scaffolding | Built, reviewed |
-| 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Built, waiting for review |
-| 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Not started |
+| 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Built, reviewed |
+| 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Built, waiting for review |
 | 3 | Clock: "today" in Sydney | Not started |
 | 4 | Infrastructure: database, dates, versions, seed data | Not started |
 | 5 | API: read endpoints, errors, start-up | Not started |
@@ -294,7 +294,63 @@ Changes from the plan:
 | Drop the `CancelledAtUtc == null` check in `IsOverdue` | `Given_CompletedOrCancelledTaskPastDue_...` (cancelled case) |
 | `Close` runs again on a closed grant | `Given_ClosedGrant_When_ClosingAgain_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-12.
+
+What was built (`src/GrantTracker.Domain/`):
+
+| Code | Behaviour |
+|---|---|
+| `GrantTask.Complete(nowUtc)` | In the order of the BR-4 table: 1. Already completed → returns without changing anything, even on a closed grant. 2. The grant is closed, or the task is cancelled → `BusinessRuleException("grant-closed")`. A cancelled task can only exist on a closed grant. 3. Otherwise `CompletedAtUtc = nowUtc`. |
+| `GrantTask.IsOverdue(today)` | `Status == Pending && DueDate < today`. |
+| `GrantTask.Grant` | A new navigation to the task's grant, set by `AddTask`. `Complete` needs it to apply the read-only rule. The internal constructor now takes the grant instead of the grant id. |
+| `GrantTask.Cancel(nowUtc)` | `internal`: only `Grant.Close` calls it. |
+| `Grant.Close(note, nowUtc)` | Replaces the minimal Part 1 version. 1. Already closed → returns without changing anything. 2. Any pending High task → `BusinessRuleException("BR-5")` with `Extensions["blockingTaskIds"]` = the ids of those tasks. Nothing changes. 3. Otherwise `Status = Closed`, `ClosedAtUtc = nowUtc`, the note is trimmed (empty or whitespace → `null`), and every pending task gets `CancelledAtUtc = nowUtc`. Completed tasks are untouched. |
+| `BusinessRuleException` | New codes `GrantClosed = "grant-closed"` and `Br5PendingHighTasks = "BR-5"`, the key `BlockingTaskIdsKey = "blockingTaskIds"`, and an `Extensions` dictionary that the API will copy into the ProblemDetails body (Part 6). |
+| `GrantTaskQueries.cs` | `IsPending` and `IsOverdue(today)` as expressions EF Core can translate. They aren't used or tested yet; Part 4 tests them against SQLite. |
+
+Tests (`tests/GrantTracker.Tests/Domain/`): 13 tests, 20 cases. "Now" is `2026-03-10T22:00:00Z` (2026-03-11 09:00 in Sydney), and `today` is 2026-03-11. Tasks whose due date must be in the past are added with an earlier `today` (2026-03-01), the way the seed data will be.
+
+| File and test | What it checks | Covers |
+|---|---|---|
+| `GrantTaskStatusTests`: `Given_TaskTimestamps_When_ReadingStatus_Then_StatusMatchesTimestamps` (neither → Pending, `CompletedAtUtc` → Completed, `CancelledAtUtc` → Cancelled) | Each state is reached through the public methods (`Complete`, `Close`), not by setting fields | §3.3 derived status |
+| `GrantTaskCompleteTests`: `Given_PendingTaskOnOpenGrant_When_Completing_Then_CompletedAtUtcIsNow` | `CompletedAtUtc` is `2026-03-10T22:00:00Z`, and the status is Completed | BR-4 |
+| `…Given_CompletedTask_When_CompletingAgainLater_Then_CompletedAtUtcIsUnchanged` | Completed at `2026-03-05T22:00:00Z`, completed again later: the date stays `2026-03-05T22:00:00Z` | BR-4: the date never changes |
+| `…Given_CompletedTaskOnClosedGrant_When_Completing_Then_NothingChangesAndNoError` | No exception. `CompletedAtUtc` is unchanged, and the task wasn't cancelled. | BR-4 repeat on a closed grant, §4.7 |
+| `…Given_CancelledTask_When_Completing_Then_ThrowsGrantClosed` | Code `"grant-closed"`. The task stays Cancelled with no `CompletedAtUtc`. | §4.7 read-only |
+| `GrantCloseTests`: `Given_PendingHighTask_When_Closing_Then_ThrowsBr5WithBlockingTaskIds` | Pending High and pending Low tasks: code `"BR-5"`, and `blockingTaskIds` is exactly the High task's id. The grant is still Open with no close time or note, and the Low task is still Pending. | BR-5, nothing changes when blocked |
+| `…Given_OnlyCompletedHighTask_When_Closing_Then_GrantIsClosed` | A completed High task doesn't block the close | BR-5: only pending High tasks block |
+| `…Given_PendingLowAndMediumTasks_When_Closing_Then_TheyAreCancelledAtClosedAtUtc` | The Low and Medium tasks get `CancelledAtUtc` = `ClosedAtUtc` = `2026-03-10T22:00:00Z`. The completed High task keeps its `CompletedAtUtc` and isn't cancelled. | Close cancels pending tasks only |
+| `…Given_NoTasks_When_Closing_Then_GrantIsClosed` | Closed, with `ClosedAtUtc` = `2026-03-10T22:00:00Z` | §7 grant with no tasks |
+| `…Given_NoteWithSpacesOrBlank_When_Closing_Then_NoteIsTrimmedOrNull` (`"  Duplicate application  "` → `"Duplicate application"`, `"   "`, `""` and `null` → `null`) | The stored note | BR-5 note handling |
+| `…Given_ClosedGrant_When_ClosingAgain_Then_NoteClosedAtAndTasksAreUnchanged` | A second close with a different note and a later time: the note, `ClosedAtUtc` and the cancelled task's `CancelledAtUtc` keep the first close's values | BR-5 repeat close, §4.7 |
+| `GrantTaskOverdueTests`: `Given_PendingTaskDueYesterday_When_CheckingOverdue_Then_IsOverdue` | Due 2026-03-10, today 2026-03-11: overdue | BR-6 |
+| `…Given_PendingTaskDueToday_When_CheckingOverdue_Then_IsNotOverdue` | Due 2026-03-11: not overdue | BR-6: due today isn't overdue |
+| `…Given_CompletedOrCancelledTaskPastDue_When_CheckingOverdue_Then_IsNotOverdue` (Completed, Cancelled) | Due 2026-03-10: not overdue | BR-6 and §10.4: only pending tasks are overdue |
+
+Mutation checks. Each was applied, all tests were run, and the file was restored. Checks 7 to 13 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | `Complete` always sets `CompletedAtUtc` | `Given_CompletedTask_When_CompletingAgainLater_...`, `Given_CompletedTaskOnClosedGrant_...` |
+| 2 | Remove the High-priority check in `Close` | `Given_PendingHighTask_When_Closing_Then_ThrowsBr5...` |
+| 3 | Block on any High task, not only pending ones | `Given_OnlyCompletedHighTask_...`, `Given_PendingLowAndMediumTasks_...` |
+| 4 | `DueDate < today` → `<=` in `IsOverdue` | `Given_PendingTaskDueToday_...` |
+| 5 | Drop the cancelled check in `IsOverdue` (`CompletedAtUtc == null` instead of Pending) | `Given_CompletedOrCancelledTaskPastDue_...` (Cancelled) |
+| 6 | `Close` runs again on a closed grant | `Given_ClosedGrant_When_ClosingAgain_...` |
+| 7 | `Complete`: remove the grant-closed check | `Given_CancelledTask_When_Completing_Then_ThrowsGrantClosed` |
+| 8 | `Complete`: check grant-closed before already-completed | `Given_CompletedTaskOnClosedGrant_...` |
+| 9 | `Close` cancels every task, including completed ones | `Given_PendingLowAndMediumTasks_...`, `Given_CompletedTaskOnClosedGrant_...` |
+| 10 | `Close` doesn't cancel pending tasks | `Given_PendingLowAndMediumTasks_...`, `Given_ClosedGrant_When_ClosingAgain_...`, `Given_CancelledTask_...`, the status Theory (Cancelled), the overdue Theory (Cancelled) |
+| 11 | `Close` doesn't trim the note | The note Theory (`"  Duplicate application  "`) |
+| 12 | `Close` marks the grant closed before checking BR-5 | `Given_PendingHighTask_..._ThrowsBr5...` (the grant must still be Open) |
+| 13 | `Status` reads a completed timestamp as Cancelled | The status Theory (Completed), `Given_PendingTaskOnOpenGrant_...`, `Given_CompletedTask_...`, `Given_CompletedTaskOnClosedGrant_...` |
+
+After restoring, `npm test` passed twice: 34 passed, 0 failed (14 from Part 1, 20 from Part 2).
+
+Changes from the plan and design:
+- **New navigation `GrantTask.Grant`.** The design names `GrantTask.Complete(nowUtc)`, which must know whether the grant is closed. The navigation is the simplest way to give it that. In Part 4, EF Core needs a constructor without the `Grant` parameter, because it can't pass navigations to a constructor. A private constructor will be added there. In Part 6, the complete service must load the task with its grant.
+- **The BR-5 extension field is named `blockingTaskIds`.** The design said only "an extension field". `docs/DESIGN.md` BR-5 now names it and says nothing changes when the close is blocked.
+- **The §4.7 row "complete a pending task on a closed grant"** has no domain test: after `Close` there are no pending tasks, so the domain can't reach that state. The race version is covered by Part 7 (OP-2).
 
 ---
 

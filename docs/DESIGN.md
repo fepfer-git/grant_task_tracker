@@ -245,7 +245,7 @@ UI: the Complete button is shown only on pending tasks of open grants.
 ### BR-5: Close a grant
 `Grant.Close(note, nowUtc)`:
 - Already Closed → no-op. **200**. Note, `ClosedAtUtc` and the tasks are unchanged.
-- Any task that is **Pending and High priority** → throw `BusinessRuleException("BR-5")` → **409**, title "Grant has pending High-priority tasks", with the blocking task ids in an extension field. Completed High tasks don't block the close (seed GR-100001).
+- Any task that is **Pending and High priority** → throw `BusinessRuleException("BR-5")` → **409**, title "Grant has pending High-priority tasks", with the blocking task ids in the extension field `blockingTaskIds`. Nothing changes when the close is blocked. Completed High tasks don't block the close (seed GR-100001).
 - Otherwise:
   - `Status = Closed`, `ClosedAtUtc = nowUtc`, `ClosedNote = note` (trimmed, empty becomes `null`).
   - Every **Pending** task (Low or Medium, since BR-5 already rules out High) → `CancelledAtUtc = nowUtc`, which makes it Cancelled.
