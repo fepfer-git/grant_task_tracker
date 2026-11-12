@@ -17,6 +17,21 @@ public class GrantTask
         Version = Guid.NewGuid();
     }
 
+    /// <summary>
+    /// Used by EF Core when it loads a task. EF can't pass a navigation to a constructor, so <see cref="Grant"/>
+    /// is set by EF only when the grant is loaded with the task (for example with <c>Include</c>).
+    /// </summary>
+    private GrantTask(Guid id, Guid grantId, string title, DateOnly dueDate, TaskPriority priority, DateTime createdAtUtc)
+    {
+        Id = id;
+        GrantId = grantId;
+        Grant = null!;
+        Title = title;
+        DueDate = dueDate;
+        Priority = priority;
+        CreatedAtUtc = createdAtUtc;
+    }
+
     public Guid Id { get; private set; }
 
     public Guid GrantId { get; private set; }
