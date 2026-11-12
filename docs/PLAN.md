@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 and 1 reviewed; Part 2 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 2 reviewed; Part 3 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -81,8 +81,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 |---|---|---|
 | 0 | Repository scaffolding | Built, reviewed |
 | 1 | Domain: creating a task (BR-1, BR-2, BR-3) | Built, reviewed |
-| 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Built, waiting for review |
-| 3 | Clock: "today" in Sydney | Not started |
+| 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Built, reviewed |
+| 3 | Clock: "today" in Sydney | Built, waiting for review |
 | 4 | Infrastructure: database, dates, versions, seed data | Not started |
 | 5 | API: read endpoints, errors, start-up | Not started |
 | 6 | API: write endpoints (BR-1 to BR-5 through the API) | Not started |
@@ -380,7 +380,51 @@ Changes from the plan and design:
 | Use the UTC date instead of converting to Sydney | `Given_UtcInstantOnPreviousUtcDate_...`, `Given_SydneyMidnight_...` |
 | Hard-code UTC+11 instead of using the time zone | `Given_DaylightSavingEnds_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-12.
+
+What was built:
+
+| File | What it holds |
+|---|---|
+| `src/GrantTracker.Api/Time/AppOptions.cs` | The `App` configuration section: `TimeZoneId`, default `"Australia/Sydney"`. `HasKnownTimeZone()` uses `TimeZoneInfo.TryFindSystemTimeZoneById`. |
+| `src/GrantTracker.Api/Time/IAppClock.cs` | `DateTime UtcNow` and `DateOnly Today`. |
+| `src/GrantTracker.Api/Time/AppClock.cs` | Finds the zone once, in the constructor. `UtcNow` = `TimeProvider.GetUtcNow().UtcDateTime`, read on every call, with `Kind = Utc`. `Today` = the `TimeProvider` instant converted to the configured zone, then its date. It never uses the machine's time zone or `DateTime.Now`/`UtcNow`. |
+| `src/GrantTracker.Api/Program.cs` | Registers `TimeProvider.System`, binds `AppOptions` to `App`, validates the zone with `ValidateOnStart()`, and registers `IAppClock` as a singleton. |
+| `src/GrantTracker.Api/appsettings.json` | `"App": { "TimeZoneId": "Australia/Sydney" }`. |
+| `tests/GrantTracker.Tests/GrantTracker.Tests.csproj` | Adds `Microsoft.Extensions.TimeProvider.Testing` 10.11.0. |
+
+Tests (`tests/GrantTracker.Tests/Api/AppClockTests.cs`): 6 tests, 8 cases. Each one builds an `AppClock` over a `FakeTimeProvider`.
+
+| Test | Instant (UTC) → expected | Covers |
+|---|---|---|
+| `Given_UtcInstantOnPreviousUtcDate_When_ReadingToday_Then_ReturnsSydneyDate` | `2026-03-10T22:00Z` → 2026-03-11 | §4.0: BR-2 and BR-6 use the Sydney date, not the UTC date. This is the pinned instant for the API tests. |
+| `Given_OneMinuteBeforeSydneyMidnight_When_ReadingToday_Then_ReturnsSameDay` | `2026-03-10T12:59Z` → 2026-03-10 | §4.0 midnight boundary (AEDT) |
+| `Given_SydneyMidnight_When_ReadingToday_Then_ReturnsNextDay` | `2026-03-10T13:00Z` → 2026-03-11 | §4.0 midnight boundary (AEDT) |
+| `Given_DaylightSavingEnds_When_ReadingTodayAroundMidnight_Then_DayChangesAtLocalMidnight` | `2026-04-05T13:59Z` → 5 April; `2026-04-05T14:00Z` → 6 April | §7: the first midnight after daylight saving ends is at UTC+10 |
+| `Given_DaylightSavingStarts_When_ReadingTodayAroundMidnight_Then_DayChangesAtLocalMidnight` | `2026-10-04T12:59Z` → 4 October; `2026-10-04T13:00Z` → 5 October | §7: the first midnight after daylight saving starts is at UTC+11 |
+| `Given_FakeClock_When_ReadingUtcNow_Then_ReturnsFakeInstantMarkedUtc` | Start `2026-03-10T22:00Z`, advance 5 minutes → `2026-03-10T22:05`, `Kind = Utc` | `UtcNow` comes from `TimeProvider`, is read when asked for, and is UTC |
+
+The test strings are parsed with the invariant culture, so the tests don't depend on the machine's culture.
+
+Mutation checks. Each was applied to `AppClock.cs`, all tests were run, and the file was restored. Checks 3 to 7 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | Use the UTC date instead of converting to Sydney | `Given_UtcInstantOnPreviousUtcDate_...`, `Given_SydneyMidnight_...`, both daylight-saving Theories (the "next day" case) |
+| 2 | Hard-code UTC+11 | `Given_DaylightSavingEnds_...` (`13:59Z` → 5 April) |
+| 3 | Hard-code UTC+10 | `Given_DaylightSavingStarts_...` (`13:00Z` → 5 October), `Given_SydneyMidnight_...` |
+| 4 | Use the machine's time zone (`TimeZoneInfo.Local`) | `Given_SydneyMidnight_...`, both daylight-saving Theories |
+| 5 | `UtcNow` from `DateTime.UtcNow` | `Given_FakeClock_When_ReadingUtcNow_...` |
+| 6 | `UtcNow` loses `DateTimeKind.Utc` (`.DateTime` instead of `.UtcDateTime`) | `Given_FakeClock_When_ReadingUtcNow_...` |
+| 7 | `UtcNow` read once, when the clock is created | `Given_FakeClock_When_ReadingUtcNow_...` |
+
+Limit of check 4: it was caught because this machine runs at UTC+07:00. On a machine set to Sydney time, `TimeZoneInfo.Local` would give the right answer and the tests couldn't tell the difference. Code review is the protection there: `AppClock` is the only class that converts to a local date (§2).
+
+Start-up check, by hand: `dotnet run` with `--App:TimeZoneId=Nowhere/Nope` stopped at start-up with `OptionsValidationException: App:TimeZoneId is not a known time zone id.` The automated test is in Part 5, as planned.
+
+After restoring, `npm test` passed twice: 42 passed, 0 failed (34 from Parts 1 and 2, and 8 from Part 3).
+
+Changes from the plan: none. The extra file `AppOptions.cs` holds the `App:TimeZoneId` setting that the plan names.
 
 ---
 
