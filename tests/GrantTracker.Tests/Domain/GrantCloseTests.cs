@@ -123,6 +123,54 @@ public class GrantCloseTests
         Assert.Equal(firstClose, task.CancelledAtUtc);
     }
 
+    [Fact]
+    public void Given_NoteOf1000CharactersAfterTrimming_When_Closing_Then_GrantIsClosedWithNote()
+    {
+        // Arrange
+        var grant = OpenGrant();
+        var note = "  " + new string('n', 1000) + "  ";
+
+        // Act
+        grant.Close(note, NowUtc);
+
+        // Assert
+        Assert.Equal(GrantStatus.Closed, grant.Status);
+        Assert.Equal(1000, grant.ClosedNote!.Length);
+    }
+
+    [Fact]
+    public void Given_NoteOf1001CharactersAfterTrimming_When_Closing_Then_ThrowsValidationOnNoteAndNothingChanges()
+    {
+        // Arrange
+        var grant = OpenGrant();
+        var task = AddTask(grant, TaskPriority.Low);
+        var note = "  " + new string('n', 1001) + "  ";
+
+        // Act
+        var exception = Assert.Throws<DomainValidationException>(() => grant.Close(note, NowUtc));
+
+        // Assert
+        Assert.Equal(["note"], exception.Errors.Keys);
+        Assert.Equal(GrantStatus.Open, grant.Status);
+        Assert.Null(grant.ClosedAtUtc);
+        Assert.Null(grant.ClosedNote);
+        Assert.Equal(GrantTaskStatus.Pending, task.Status);
+    }
+
+    [Fact]
+    public void Given_PendingHighTaskAndTooLongNote_When_Closing_Then_ThrowsBr5()
+    {
+        // Arrange
+        var grant = OpenGrant();
+        AddTask(grant, TaskPriority.High);
+
+        // Act
+        var exception = Record.Exception(() => grant.Close(new string('n', 1001), NowUtc));
+
+        // Assert: BR-5 is checked first, so the note doesn't matter.
+        Assert.Equal("BR-5", Assert.IsType<BusinessRuleException>(exception).Code);
+    }
+
     private static Grant OpenGrant() =>
         new(new Guid("00000000-0000-0000-0000-000000100001"), "GR-100001", "Riverside Community Garden Inc.", new DateOnly(2026, 1, 10));
 

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 using GrantTracker.Domain;
 using GrantTracker.Infrastructure;
@@ -78,9 +79,14 @@ public sealed class GrantTrackerApiFactory : WebApplicationFactory<Program>
     }
 }
 
-/// <summary>Reads a response body as JSON, so tests assert on the exact text the client receives.</summary>
-public static class ResponseJson
+/// <summary>
+/// JSON in and out of the API. Bodies are written and read as text, so tests control and assert the exact JSON
+/// the client sends and receives.
+/// </summary>
+public static class ApiJson
 {
+    public static StringContent Body(string json) => new(json, Encoding.UTF8, "application/json");
+
     public static async Task<JsonObject> ReadObject(HttpResponseMessage response) =>
         JsonNode.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))!.AsObject();
 

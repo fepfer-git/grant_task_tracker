@@ -23,7 +23,7 @@ public sealed class GrantConfiguration : IEntityTypeConfiguration<Grant>
         builder.Property(g => g.Status).IsRequired().HasConversion<int>();
         builder.HasIndex(g => g.Status);
 
-        builder.Property(g => g.ClosedNote).HasMaxLength(1000);
+        builder.Property(g => g.ClosedNote).HasMaxLength(Grant.ClosedNoteMaxLength);
         builder.Property(g => g.ClosedAtUtc);
 
         builder.Property(g => g.Version).IsConcurrencyToken();

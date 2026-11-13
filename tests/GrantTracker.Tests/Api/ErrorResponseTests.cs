@@ -1,5 +1,5 @@
 using System.Net;
-using static GrantTracker.Tests.Api.ResponseJson;
+using static GrantTracker.Tests.Api.ApiJson;
 
 namespace GrantTracker.Tests.Api;
 

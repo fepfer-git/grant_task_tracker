@@ -3,8 +3,11 @@ namespace GrantTracker.Domain;
 /// <summary>A grant and its tasks (DESIGN.md §3.1). Grants are never deleted.</summary>
 public class Grant
 {
+    public const int ClosedNoteMaxLength = 1000;
+
     private const string TitleField = "title";
     private const string DueDateField = "dueDate";
+    private const string NoteField = "note";
 
     private readonly List<GrantTask> _tasks = [];
 
@@ -81,12 +84,15 @@ public class Grant
     /// Closes the grant (DESIGN.md BR-5):
     /// already closed → no change (the note, <see cref="ClosedAtUtc"/> and the tasks stay as they are);
     /// any pending High-priority task → BR-5, and nothing changes;
+    /// a note over <see cref="ClosedNoteMaxLength"/> characters after trimming → validation error, and nothing changes;
     /// otherwise the grant is closed and every pending task is cancelled at the same instant.
+    /// BR-5 is checked before the note, so a blocked close reports BR-5 whatever the note is.
     /// </summary>
     /// <param name="note">Optional. Trimmed; empty or whitespace becomes <c>null</c>.</param>
     /// <exception cref="BusinessRuleException">
     /// BR-5, with the blocking task ids in <see cref="BusinessRuleException.BlockingTaskIdsKey"/>.
     /// </exception>
+    /// <exception cref="DomainValidationException">The note is too long, keyed on <c>note</c>.</exception>
     public void Close(string? note, DateTime nowUtc)
     {
         if (Status == GrantStatus.Closed)
@@ -107,9 +113,18 @@ public class Grant
                 new Dictionary<string, object?> { [BusinessRuleException.BlockingTaskIdsKey] = blockingTaskIds });
         }
 
+        var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        if (trimmedNote is { Length: > ClosedNoteMaxLength })
+        {
+            throw new DomainValidationException(new Dictionary<string, string[]>
+            {
+                [NoteField] = [$"Note must be {ClosedNoteMaxLength} characters or fewer."],
+            });
+        }
+
         Status = GrantStatus.Closed;
         ClosedAtUtc = nowUtc;
-        ClosedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        ClosedNote = trimmedNote;
 
         foreach (var task in _tasks.Where(t => t.Status == GrantTaskStatus.Pending))
         {

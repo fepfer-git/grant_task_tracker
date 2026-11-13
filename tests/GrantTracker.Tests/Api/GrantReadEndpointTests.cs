@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json.Nodes;
-using static GrantTracker.Tests.Api.ResponseJson;
+using static GrantTracker.Tests.Api.ApiJson;
 
 namespace GrantTracker.Tests.Api;
 
@@ -11,6 +11,7 @@ namespace GrantTracker.Tests.Api;
 public class GrantReadEndpointTests
 {
     private const string Gr100001 = "00000000-0000-0000-0000-000000100001";
+    private const string Gr100002 = "00000000-0000-0000-0000-000000100002";
     private const string Gr100003 = "00000000-0000-0000-0000-000000100003";
 
     [Fact]
@@ -29,6 +30,26 @@ public class GrantReadEndpointTests
         Assert.Equal(
             ["GR-100001: 2", "GR-100002: 2", "GR-100003: 0", "GR-100004: 0"],
             grants.Select(g => $"{g!["reference"]}: {g["pendingTaskCount"]}"));
+    }
+
+    [Fact]
+    public async Task Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero()
+    {
+        // Arrange: closing GR-100002 cancels its two pending tasks. The seed has no cancelled task otherwise.
+        using var factory = new GrantTrackerApiFactory();
+        var client = factory.CreateClient();
+        var close = await client.PutAsync($"/grants/{Gr100002}/close", Body("""{"note":"Organisation withdrew"}"""), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, close.StatusCode);
+
+        // Act
+        var response = await client.GetAsync("/grants", TestContext.Current.CancellationToken);
+
+        // Assert: cancelled tasks aren't pending (§7).
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var grants = await ReadArray(response);
+        var gr100002 = grants.Single(g => (string)g!["reference"]! == "GR-100002")!;
+        Assert.Equal("Closed", (string)gr100002["status"]!);
+        Assert.Equal(0, (int)gr100002["pendingTaskCount"]!);
     }
 
     [Theory]

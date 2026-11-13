@@ -8,8 +8,12 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers()
-    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+// Enum names only: a number such as 3 is rejected, not read as High.
+// Request DTOs mark optional fields with '?', so the framework's implicit "required" check isn't needed; it would also
+// add a misleading error for the whole body when one field can't be read.
+builder.Services.AddControllers(options => options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true)
+    .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)))
+    .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = InvalidInputResponse.Create);
 
 // One ProblemDetails shape for every error (DESIGN.md §5.1).
 builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ProblemTypes.ApplyDefaults);
@@ -29,6 +33,7 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connect
 builder.Services.AddHostedService<DatabaseInitializer>();
 
 builder.Services.AddScoped<GrantQueryService>();
+builder.Services.AddScoped<GrantCommandService>();
 
 var app = builder.Build();
 

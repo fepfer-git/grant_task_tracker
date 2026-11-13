@@ -1,7 +1,7 @@
 using System.Net;
 using GrantTracker.Domain;
 using GrantTracker.Infrastructure;
-using static GrantTracker.Tests.Api.ResponseJson;
+using static GrantTracker.Tests.Api.ApiJson;
 
 namespace GrantTracker.Tests.Api;
 

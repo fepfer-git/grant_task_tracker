@@ -37,6 +37,16 @@ public static class ProblemTypes
         Extensions = { [CodeField] = code },
     };
 
+    /// <summary>A 400 with field errors, keyed on the API's field names (for example <c>title</c>, <c>dueDate</c>).</summary>
+    public static ValidationProblemDetails CreateValidation(IReadOnlyDictionary<string, string[]> errors) => new(errors.ToDictionary())
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Type = TypeFor(Validation),
+        Title = "One or more validation errors occurred.",
+        Detail = "See the errors field for the fields to correct.",
+        Extensions = { [CodeField] = Validation },
+    };
+
     /// <summary>
     /// Runs for every ProblemDetails body, including those ASP.NET Core writes itself (model validation, and a
     /// route that doesn't match, such as an id that isn't a Guid). For 400, 404 and 500 it replaces the framework's

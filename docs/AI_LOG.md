@@ -65,6 +65,12 @@
 |---|---|---|
 | Response DTOs named `GrantSummaryDto` (a row of `GET /grants`) and `GrantDetailDto` (`GET /grants/{id}`). | The user said the names don't reflect their purpose. | Renamed to `GrantListItemDto` and `GrantDto` (files and types). The JSON shapes are unchanged. |
 
+### 2026-11-13: Part 6 (API write endpoints)
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Part 6 reported as Built, with 17 mutation checks all caught. `POST /grants/{id}/tasks` checks that `id`, `dueDate` and `priority` are present, but only the `id` check had a test. The Part 5 list test's only zero `pendingTaskCount` came from a grant whose task was completed. | The user asked whether a missing `dueDate` or `priority` was tested, and suggested a list test with cancelled tasks. Checked by mutation: removing the `dueDate` check, removing the `priority` check, or counting cancelled tasks as pending all passed every test. Without the checks, a missing value returned a 500. My mutation list had covered the `id` check and missed the other two. | Added `Given_MissingTaskTitleDueDateOrPriority_When_PostingTask_Then_Returns400KeyedOnField` (5 cases, including a missing `title`) and `Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero`. Mutation checks 18 to 20 now fail them. Part 6 build record updated. |
+
 ## Prompt log
 
 ### 2026-11-11 01:49 (+07:00)
@@ -179,3 +185,13 @@
 ### 2026-11-13 02:40 (+07:00)
 
 > Go with C first. Mark this as limitation as it will violate the RFC 9457. Note that the ideal way is to create our own helper page. However we will not implement that.
+
+### 2026-11-13 02:53 (+07:00)
+
+> approved. Please start part 6
+
+### 2026-11-13 13:23 (+07:00)
+
+> Please help me check the tests. Did the test cover the case where dueDate is missing or priority is missing? I see there is a test called: Given_MissingOrEmptyId_When_PostingTask_Then_Returns400KeyedOnId check for the ID, but no test check for the duedate and priority. 
+>
+> also consider add a test case like: Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero

@@ -80,7 +80,7 @@ erDiagram
 | OrganisationName | `string` | Required, max 200 | |
 | ApplicationDate | `DateOnly` | Required | Calendar date in the program time zone |
 | Status | `GrantStatus` | Required, stored as int (`Open = 0`, `Closed = 1`), index | Open is the default value. Serialised as string in API. |
-| ClosedNote | `string?` | Optional, max 1000 | The officer's reason for closing. Optional in every case. |
+| ClosedNote | `string?` | Optional, max 1000 (after trimming, checked by `Grant.Close`) | The officer's reason for closing. Optional in every case. |
 | ClosedAtUtc | `DateTime?` | Set on close | When the grant was closed |
 | Version | `Guid` | Concurrency token | Renewed on every change (§3.5) |
 | Tasks | `ICollection<GrantTask>` | Navigation | |
@@ -247,7 +247,8 @@ UI: the Complete button is shown only on pending tasks of open grants.
 - Already Closed → no-op. **200**. Note, `ClosedAtUtc` and the tasks are unchanged.
 - Any task that is **Pending and High priority** → throw `BusinessRuleException("BR-5")` → **409**, title "Grant has pending High-priority tasks", with the blocking task ids in the extension field `blockingTaskIds`. Nothing changes when the close is blocked. Completed High tasks don't block the close (seed GR-100001).
 - Otherwise:
-  - `Status = Closed`, `ClosedAtUtc = nowUtc`, `ClosedNote = note` (trimmed, empty becomes `null`).
+  - The note is trimmed, and empty becomes `null`. A note longer than **1000 characters** after trimming → `DomainValidationException` keyed on `note` → **400**, and nothing changes. This is checked after BR-5, the same way BR-1 is checked before the field rules when adding a task: if the close is blocked, the note doesn't matter.
+  - `Status = Closed`, `ClosedAtUtc = nowUtc`, `ClosedNote = note`.
   - Every **Pending** task (Low or Medium, since BR-5 already rules out High) → `CancelledAtUtc = nowUtc`, which makes it Cancelled.
   - **200** with the grant and its tasks.
 
@@ -289,9 +290,9 @@ The check lives in the domain (`GrantTask.Complete` asks its grant), so every en
 |---|---|---|
 | `GET /grants?status=Open\|Closed` | 200: list including `pendingTaskCount` | 400 for an invalid status |
 | `GET /grants/{id}` | 200: grant with `today` and its tasks, each with `status` and `isOverdue` | 404 |
-| `POST /grants/{id}/tasks` | 201 + `Location`, the task. 200, the existing task, when the same `id` is sent again with the same values (§6.3). | 400 (BR-2, BR-3, missing `id`, bad input), 404, 409 (BR-1, `duplicate-task-id`, concurrency) |
+| `POST /grants/{id}/tasks` | 201 + `Location: /grants/{id}`, the task. There's no endpoint for a single task, so `Location` points to the grant, where the new task is listed. 200, the existing task, when the same `id` is sent again with the same values (§6.3). | 400 (BR-2, BR-3, missing `id`, bad input), 404, 409 (BR-1, `duplicate-task-id`, concurrency) |
 | `PUT /tasks/{id}/complete` | 200, the task (also when already completed) | 404, 409 (grant closed, concurrency) |
-| `PUT /grants/{id}/close` | 200, the grant with its tasks (also when already closed) | 404, 409 (BR-5, concurrency) |
+| `PUT /grants/{id}/close` | 200, the grant with its tasks (also when already closed) | 400 (`note` over 1000 characters), 404, 409 (BR-5, concurrency) |
 | `GET /tasks/overdue` | 200: list | — |
 | `GET /health/live` | 200 `Healthy` (§6.4) | — |
 | `GET /health/ready` | 200 `Healthy` (§6.4) | 503 `Unhealthy` when the database can't be reached |
@@ -307,7 +308,7 @@ One exception-handling middleware, using ASP.NET Core's `UseExceptionHandler` + 
 
 | Exception | Status | `code` | `title` |
 |---|---|---|---|
-| Model binding or validation failure, BR-2, BR-3 | 400 | `validation` | "One or more validation errors occurred." + `errors{field: [...]}` |
+| Model binding or validation failure, BR-2, BR-3, a close note over 1000 characters | 400 | `validation` | "One or more validation errors occurred." + `errors{field: [...]}` |
 | `NotFoundException` | 404 | `not-found` | "Grant not found" / "Task not found" |
 | `BusinessRuleException` BR-1 | 409 | `BR-1` | "Grant is closed" |
 | `BusinessRuleException` grant-closed | 409 | `grant-closed` | "Grant is closed; its tasks are read-only" |

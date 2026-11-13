@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 4 reviewed; Part 5 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 5 reviewed; Part 6 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -84,8 +84,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 2 | Domain: complete, close, status, overdue (BR-4, BR-5, BR-6, §4.7) | Built, reviewed |
 | 3 | Clock: "today" in Sydney | Built, reviewed |
 | 4 | Infrastructure: database, dates, versions, seed data | Built, reviewed |
-| 5 | API: read endpoints, errors, start-up | Built, waiting for review |
-| 6 | API: write endpoints (BR-1 to BR-5 through the API) | Not started |
+| 5 | API: read endpoints, errors, start-up | Built, reviewed |
+| 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, waiting for review |
 | 7 | OP-2 retry and OP-3 safe task creation | Not started |
 | 8 | OP-5 health checks | Not started |
 | 9 | Swagger UI (Development only) | Not started |
@@ -739,7 +739,108 @@ Changes from the plan:
 | Return 409 for an already-completed task | `Given_CompletedTask_When_CompletingAgain...` |
 | Return 409 when closing an already-closed grant | `Given_ClosedGrant_When_ClosingAgain_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+Decided with you before building (DESIGN.md updated, Decisions 13 and 14):
+- **Close note length.** `Grant.Close` rejects a note over 1000 characters after trimming with a validation error keyed on `note` (400). It's checked after BR-5, like BR-1 before the field rules when adding a task. Before this, nothing enforced §3.1's "max 1000", because SQLite ignores column lengths.
+- **`Location` on 201.** There's no endpoint for a single task, so `Location` is `/grants/{grantId}`, where the new task is listed.
+
+What was built:
+
+| File | What it holds |
+|---|---|
+| `src/GrantTracker.Domain/Grant.cs` | `ClosedNoteMaxLength = 1000`, and the note check in `Close` (after BR-5, before any change). |
+| `src/GrantTracker.Infrastructure/Configurations/GrantConfiguration.cs` | `ClosedNote` max length uses `Grant.ClosedNoteMaxLength`. Same value, so the model and migration are unchanged. |
+| `src/GrantTracker.Api/Contracts/CreateTaskRequest.cs` | `id`, `title`, `dueDate`, `priority`, all nullable, so a missing field is a field error rather than a JSON error. |
+| `src/GrantTracker.Api/Contracts/CloseGrantRequest.cs` | `note`, optional. |
+| `src/GrantTracker.Api/Services/GrantCommandService.cs` | `AddTaskAsync` (loads the grant), `CompleteTaskAsync` (loads the task with its grant, which `Complete` needs for §4.7), `CloseGrantAsync` (loads the grant with its tasks, which BR-5 and the cancelling need). Each takes `today` and `nowUtc` from `IAppClock`, calls the domain, saves, and returns a DTO. No rules; no retry yet (Part 7). |
+| `src/GrantTracker.Api/Controllers/GrantsController.cs` | `POST /grants/{id:guid}/tasks`: §6.3 step 1 checks (`id` present and not empty, `dueDate` and `priority` present), then 201 with `Location: /grants/{id}`. `PUT /grants/{id:guid}/close`: the body parameter is nullable, so an empty body is allowed. |
+| `src/GrantTracker.Api/Controllers/TasksController.cs` | `PUT /tasks/{id:guid}/complete`. |
+| `src/GrantTracker.Api/Errors/ApiExceptionHandler.cs` | Adds `DomainValidationException` → 400 `validation` with the field errors, and `BusinessRuleException` → 409 with the rule's `code` (`BR-1`, `grant-closed`, `BR-5`), the §5.1 title, the exception message as `detail`, and the exception's extension fields (BR-5's `blockingTaskIds`). An unknown rule code gets a generic title; no such code exists today. |
+| `src/GrantTracker.Api/Errors/ProblemTypes.cs` | Adds `CreateValidation(errors)`. |
+| `src/GrantTracker.Api/Errors/InvalidInputResponse.cs` | The 400 for input the JSON reader can't read. ASP.NET Core keys those errors on the JSON path (`$.dueDate`) with a message naming .NET types; this keys them on the field (`dueDate`) with "The value isn't in the expected format." |
+| `src/GrantTracker.Api/Program.cs` | Enum names only (`JsonStringEnumConverter(allowIntegerValues: false)`), so `"priority": 3` is a 400 rather than High. The implicit "required" check for non-nullable references is off, because the DTOs mark optional fields with `?` and the check added a misleading `request` error. `InvalidInputResponse` is the invalid-input response. Registers `GrantCommandService`. |
+| `tests/GrantTracker.Tests/Api/GrantTrackerApiFactory.cs` | `ResponseJson` renamed `ApiJson`, with `Body(json)` for request bodies written as literal JSON. |
+
+Found by a probe before writing the input tests (the probe test was deleted afterwards): `"priority": 3` was accepted as High, and a malformed date or priority came back keyed `$.dueDate` / `$.priority` with a .NET type name in the message, plus a stray `request` error. Both were fixed as above, and both have tests.
+
+Tests: 3 domain tests (3 cases) and 21 API tests (27 cases), plus 2 API tests (6 cases) added after review (below).
+
+| File | Test | Covers |
+|---|---|---|
+| `Domain/GrantCloseTests.cs` | `Given_NoteOf1000CharactersAfterTrimming_When_Closing_Then_GrantIsClosedWithNote` | Close note boundary (accepted) |
+| `Domain/GrantCloseTests.cs` | `Given_NoteOf1001CharactersAfterTrimming_When_Closing_Then_ThrowsValidationOnNoteAndNothingChanges` | Close note boundary (rejected; grant, note and tasks unchanged) |
+| `Domain/GrantCloseTests.cs` | `Given_PendingHighTaskAndTooLongNote_When_Closing_Then_ThrowsBr5` | BR-5 is checked before the note |
+| `Api/CreateTaskEndpointTests.cs` | `Given_OpenGrant_When_PostingValidTask_Then_Returns201WithLocationAndTaskIsSaved` (`Location` `/grants/{id}`, trimmed title, `createdAtUtc` `"2026-03-10T22:00:00Z"`, listed on the grant) | §5 create |
+| `Api/CreateTaskEndpointTests.cs` | `Given_ClosedGrant_When_PostingTask_Then_Returns409Br1` (GR-100003; `type`, `code` `BR-1`, title "Grant is closed") | BR-1 through the API |
+| `Api/CreateTaskEndpointTests.cs` | `Given_DueDateIsUtcDateButNotSydneyDate_When_PostingTask_Then_Returns400KeyedOnDueDate` (`"2026-03-10"`) | BR-2; catches a switch to the UTC date |
+| `Api/CreateTaskEndpointTests.cs` | `Given_DueDateIsSydneyToday_When_PostingTask_Then_Returns201` (`"2026-03-11"`) | BR-2 boundary |
+| `Api/CreateTaskEndpointTests.cs` | `Given_DueDateBeforeApplicationDate_When_PostingTask_Then_Returns400KeyedOnDueDate` (a grant with application date 2026-03-20, due 2026-03-19; only the application-date message) | BR-2 |
+| `Api/CreateTaskEndpointTests.cs` | `Given_InvalidTaskTitle_When_PostingTask_Then_Returns400KeyedOnTitle` (Theory: whitespace, 101 characters) | BR-3 |
+| `Api/CreateTaskEndpointTests.cs` | `Given_InvalidTaskTitleAndInvalidDueDate_When_PostingTask_Then_Returns400WithBothFieldErrors` | §4 order of checks |
+| `Api/CreateTaskEndpointTests.cs` | `Given_MissingOrEmptyId_When_PostingTask_Then_Returns400KeyedOnId` (Theory: missing, empty GUID) | §6.3 step 1 |
+| `Api/CreateTaskEndpointTests.cs` | `Given_UnknownPriorityOrMalformedDate_When_PostingTask_Then_Returns400KeyedOnField` (Theory: `"Urgent"`, `3`, `"2026-3-20"`, `"20/03/2026"`, `"2026-02-30"`) | §6.3 step 1, §7 invalid input |
+| `Api/CreateTaskEndpointTests.cs` | `Given_UnknownGrant_When_PostingTask_Then_Returns404` | §5 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_PendingTask_When_Completing_Then_Returns200WithCompletedAtUtcFromClock` (`"2026-03-10T22:00:00Z"`) | BR-4 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_CompletedTask_When_CompletingAgainAfterClockAdvances_Then_Returns200WithOriginalCompletedAtUtc` | BR-4 repeat, OP-3 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_CancelledTask_When_Completing_Then_Returns409GrantClosed` (GR-100002 closed first) | §4.7 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_CompletedTaskOnClosedGrant_When_Completing_Then_Returns200AndNothingChanges` (GR-100003, `"2025-10-10T22:00:00Z"` kept) | BR-4, §4.7 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_PendingHighTask_When_ClosingGrant_Then_Returns409Br5WithBlockingTaskIds` (GR-100001; only "Verify bank details" blocks; grant still Open) | BR-5 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_PendingLowAndMediumTasks_When_ClosingGrantWithNote_Then_Returns200AndTasksAreCancelled` (GR-100002; note trimmed; both tasks Cancelled at `"2026-03-10T22:00:00Z"`, not overdue; `pendingTaskCount` 0) | BR-5 close path, §8 demo |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_ClosedGrant_When_ClosingAgain_Then_Returns200AndNothingChanges` (GR-100003; note stays null, `closedAtUtc` `"2025-10-16T22:00:00Z"`) | BR-5 repeat, OP-3 |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_NoBody_When_ClosingGrantWithoutTasks_Then_Returns200WithNoNote` (GR-100004) | The body is optional |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_NoteOver1000Characters_When_ClosingGrant_Then_Returns400KeyedOnNote` | Close note limit through the API |
+| `Api/CompleteAndCloseEndpointTests.cs` | `Given_UnknownTaskOrGrant_When_CompletingOrClosing_Then_Returns404` (Theory: "Task not found", "Grant not found") | §5 |
+
+Mutation checks. Each was applied, all tests were run, and the file was restored. Checks 6 to 17 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | Map BR-1 to 400 instead of 409 | `Given_ClosedGrant_When_PostingTask_Then_Returns409Br1` |
+| 2 | The service passes the UTC date as `today` | `Given_DueDateIsUtcDateButNotSydneyDate_...`, `Given_InvalidTaskTitleAndInvalidDueDate_...` |
+| 3 | Key the BR-2 error on `title` | `Given_DueDateIsUtcDateButNotSydneyDate_...`, `Given_DueDateBeforeApplicationDate_...`, `Given_InvalidTaskTitleAndInvalidDueDate_...` (API), and three Part 1 domain tests |
+| 4 | Return 409 for an already-completed task | `Given_CompletedTask_When_CompletingAgain...`, `Given_CompletedTaskOnClosedGrant_...` (API), and two Part 2 domain tests |
+| 5 | Return 409 when closing an already-closed grant | `Given_ClosedGrant_When_ClosingAgain_...` (API and domain) |
+| 6 | Note limit off by one (1000 rejected) | `Given_NoteOf1000CharactersAfterTrimming_...` |
+| 7 | No note length check | `Given_NoteOf1001CharactersAfterTrimming_...`, `Given_NoteOver1000Characters_When_ClosingGrant_...` |
+| 8 | BR-5 extension fields not copied (no `blockingTaskIds`) | `Given_PendingHighTask_When_ClosingGrant_...` |
+| 9 | `DomainValidationException` not mapped (500) | All five API validation tests for BR-2, BR-3 and the note |
+| 10 | No `Location` header on 201 | `Given_OpenGrant_When_PostingValidTask_...` |
+| 11 | Enum numbers allowed | `Given_UnknownPriorityOrMalformedDate_...` (`3`) |
+| 12 | Unreadable input keyed on the JSON path | `Given_UnknownPriorityOrMalformedDate_...` (all five cases) |
+| 13 | Implicit "required" check left on | `Given_UnknownPriorityOrMalformedDate_...` (all five cases: the extra `request` error) |
+| 14 | Empty GUID accepted as `id` | `Given_MissingOrEmptyId_...` (empty GUID) |
+| 15 | Complete loads the task without its grant | `Given_PendingTask_When_Completing_...`, `Given_CompletedTask_When_CompletingAgain...`, `Given_CancelledTask_...` |
+| 16 | Close loads the grant without its tasks | `Given_PendingHighTask_When_ClosingGrant_...`, `Given_PendingLowAndMediumTasks_...` |
+| 17 | Close body required (parameter not nullable) | `Given_NoBody_When_ClosingGrantWithoutTasks_...`, `Given_UnknownTaskOrGrant_...` (close) |
+| 18 | `dueDate` "required" check removed | `Given_MissingTaskTitleDueDateOrPriority_...` (missing and null `dueDate`) |
+| 19 | `priority` "required" check removed | `Given_MissingTaskTitleDueDateOrPriority_...` (missing and null `priority`) |
+| 20 | `pendingTaskCount` counts cancelled tasks (only "not completed") | `Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero` |
+
+Gaps found in review (2026-11-13). You asked whether a missing `dueDate` or `priority` was tested, and suggested a list test with cancelled tasks. Checks 18 to 20 were first run against the tests as they were, and **all three survived**:
+- Without the `dueDate` or `priority` check, a missing value crashes on `.Value` and returns a 500, and no test noticed. Only the `id` check had a test.
+- The list test's only zero count was GR-100003, whose task is *completed*. No test had a *cancelled* task, so counting cancelled tasks as pending went unnoticed.
+
+Two tests were added (6 cases), and checks 18 to 20 now fail them:
+
+| File | Test | Covers |
+|---|---|---|
+| `Api/CreateTaskEndpointTests.cs` | `Given_MissingTaskTitleDueDateOrPriority_When_PostingTask_Then_Returns400KeyedOnField` (Theory: `dueDate` missing or null → "Due date is required."; `priority` missing or null → "Priority is required."; `title` missing → "Title is required."; no task created) | §6.3 step 1, BR-3 |
+| `Api/GrantReadEndpointTests.cs` | `Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero` (GR-100002 closed through the API, then listed: Closed, `pendingTaskCount` 0) | §5 `pendingTaskCount`, §7 (Pending only) |
+
+The missing-`title` case had the same gap at the API level, although the domain already tested it (Part 1), so it was added to the same Theory.
+
+Notes on the first run:
+- Check 7 was first written as a pattern that can never match, and the compiler rejected it (CS8518). It was re-run with a condition the compiler can't evaluate.
+- Check 17 first removed `[FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)]` from the close action, and **survived**: since .NET 7, a nullable body parameter already accepts an empty body, so the attribute did nothing. It was removed, and check 17 now makes the parameter non-nullable, which the tests catch.
+
+After restoring, `npm test` passed twice: 114 passed, 0 failed (78 from Parts 1 to 5, and 36 from Part 6, including the 6 cases added after review).
+
+Changes from the plan:
+- `Given_UnknownPriorityOrMalformedDate_..._Then_Returns400` is named `..._Then_Returns400KeyedOnField`, because it now also checks the field key (§6.3 step 1 says these errors are keyed on the field).
+- Added tests: the three domain note tests, `Given_NoBody_When_ClosingGrantWithoutTasks_...` and `Given_NoteOver1000Characters_When_ClosingGrant_...`.
+- New files not named in the plan: the two request DTOs, `GrantCommandService.cs`, `InvalidInputResponse.cs`, and the test file split (`CreateTaskEndpointTests.cs`, `CompleteAndCloseEndpointTests.cs`).
+- A repeated create with the same task id currently fails with a 500 (primary-key violation). That's expected until Part 7, which adds the id lookup and the retry.
 
 ---
 
@@ -1012,3 +1113,5 @@ Made on 2026-11-12:
 Made on 2026-11-13:
 
 12. Problem `type` values are absolute URIs, `https://granttracker.example/problems/<code>`, with the short code in a `code` extension field that the UI and tests switch on (DESIGN.md §5.1). No documentation pages are published at those URIs; this is a recorded limitation (DESIGN.md §10.8).
+13. `Grant.Close` rejects a note longer than 1000 characters after trimming: 400 keyed on `note`, checked after BR-5 (DESIGN.md §3.1, BR-5, §5, §5.1).
+14. `POST /grants/{id}/tasks` returns `Location: /grants/{id}`, because there is no endpoint for a single task (DESIGN.md §5).
