@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 6 reviewed; Part 7 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 7 reviewed; Part 8 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -86,8 +86,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 4 | Infrastructure: database, dates, versions, seed data | Built, reviewed |
 | 5 | API: read endpoints, errors, start-up | Built, reviewed |
 | 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, reviewed |
-| 7 | OP-2 retry and OP-3 safe task creation | Built, waiting for review |
-| 8 | OP-5 health checks | Not started |
+| 7 | OP-2 retry and OP-3 safe task creation | Built, reviewed |
+| 8 | OP-5 health checks | Built, waiting for review |
 | 9 | Swagger UI (Development only) | Not started |
 | 10 | UI foundation: app, API client, one test command | Not started |
 | 11 | UI: grant screen (tasks, Complete, Add task) | Not started |
@@ -988,7 +988,42 @@ The unreachable database is a connection string pointing into a folder that does
 | `/health/live` also runs the database check | `Given_UnreachableDatabase_When_CallingLive_...` |
 | `/health/ready` runs no checks | `Given_UnreachableDatabase_When_CallingReady_Then_Returns503...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built:
+- Package `Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore` 10.0.15 in `GrantTracker.Api` (same version as EF Core).
+- `Program.cs`: `AddHealthChecks().AddDbContextCheck<AppDbContext>(tags: ["ready"])`. `/health/live` maps with `Predicate = _ => false`, so it runs no checks. `/health/ready` runs only the checks tagged `ready`.
+- The default response writer is kept on purpose. It writes only the status word (`Healthy` or `Unhealthy`) as `text/plain`, and maps Unhealthy to 503. Nothing else from the report reaches the caller.
+- The health endpoints are written in a few lines of `Program.cs`, so no new source file was needed.
+
+Tests (`tests/GrantTracker.Tests/Api/HealthCheckTests.cs`, 5 tests). Each test asserts the status code and the exact body.
+
+| Test | Covers |
+|---|---|
+| `Given_RunningApp_When_CallingLive_Then_Returns200Healthy` | OP-5 liveness |
+| `Given_ReachableDatabase_When_CallingReady_Then_Returns200Healthy` | OP-5 readiness |
+| `Given_UnreachableDatabase_When_CallingReady_Then_Returns503Unhealthy` | OP-5: take the copy out of the load balancer |
+| `Given_UnreachableDatabase_When_CallingLive_Then_StillReturns200` | OP-5: liveness doesn't check the database |
+| `Given_UnreachableDatabase_When_CallingReady_Then_BodyHasNoExceptionDetails` | §6.4: the body is exactly `Unhealthy`; it doesn't contain the database path or the check's name |
+
+The unreachable database is a SQLite file in a temp folder with a new random name that doesn't exist. The test's app replaces the DbContext registration with that connection string and removes `DatabaseInitializer`, as planned. The run doesn't create the folder; this was checked after the run.
+
+Mutation checks (all done, each restored afterwards; script `mutate_part8.sh` in the session scratchpad):
+
+| # | Break | Failing tests |
+|---|---|---|
+| 1 | `/health/live` maps with no predicate, so it runs the database check (planned) | `Given_UnreachableDatabase_When_CallingLive_Then_StillReturns200` |
+| 2 | `/health/ready` runs no checks (planned) | `..._When_CallingReady_Then_Returns503Unhealthy`, `..._Then_BodyHasNoExceptionDetails` |
+| 3 | The database check isn't tagged `ready` | `..._When_CallingReady_Then_Returns503Unhealthy`, `..._Then_BodyHasNoExceptionDetails` |
+| 4 | A custom response writer adds each check's name, description and exception message | `..._Then_BodyHasNoExceptionDetails`, `..._Then_Returns503Unhealthy`, `Given_ReachableDatabase_...` |
+| 5 | Unhealthy maps to 200 instead of 503 | `..._When_CallingReady_Then_Returns503Unhealthy` |
+| 6 | The health endpoints aren't mapped | All 5 health tests |
+
+Manual check: the real app, run on a scratch database file, returned `Healthy` with 200 and `text/plain` on both endpoints. Deleting the database file while the app ran wasn't possible on Windows, because the app's pooled connection keeps the file locked. So the outage is tested only by the tests above. The scratch files were deleted afterwards.
+
+Changes from the plan: none to the behaviour. Four mutation checks were added to the two planned ones.
+
+`npm test`: 138 passed (133 before, plus 5), on two runs. Build: 0 warnings.
 
 ---
 

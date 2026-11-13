@@ -4,6 +4,7 @@ using GrantTracker.Api.Services;
 using GrantTracker.Api.Startup;
 using GrantTracker.Api.Time;
 using GrantTracker.Infrastructure;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -35,11 +36,22 @@ builder.Services.AddHostedService<DatabaseInitializer>();
 builder.Services.AddScoped<GrantQueryService>();
 builder.Services.AddScoped<GrantCommandService>();
 
+// OP-5 health checks (DESIGN.md §6.4). Only readiness checks the database.
+const string readyTag = "ready";
+builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>(tags: [readyTag]);
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 app.MapControllers();
+
+// The body is the default writer's status word only (Healthy or Unhealthy), so no exception details or connection
+// strings reach the caller. Unhealthy is a 503.
+// Liveness runs no checks: a database outage must not make Kubernetes restart every copy of the API.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+// Readiness fails while the database can't be reached, which takes this copy out of the load balancer.
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains(readyTag) });
 
 app.Run();
