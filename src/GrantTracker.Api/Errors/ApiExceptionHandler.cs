@@ -19,6 +19,16 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
                 StatusCodes.Status404NotFound, ProblemTypes.NotFound, notFound.Title, notFound.Message),
             DomainValidationException invalid => ProblemTypes.CreateValidation(invalid.Errors),
             BusinessRuleException rule => FromBusinessRule(rule),
+            DuplicateTaskIdException duplicate => ProblemTypes.Create(
+                StatusCodes.Status409Conflict,
+                ProblemTypes.DuplicateTaskId,
+                "This task id is already used by a task with different details",
+                duplicate.Message),
+            ConcurrencyConflictException => ProblemTypes.Create(
+                StatusCodes.Status409Conflict,
+                ProblemTypes.ConcurrencyConflict,
+                "The record was changed by someone else. Reload and try again.",
+                "Other officers changed this grant at the same time, so the change couldn't be saved."),
             _ => null,
         };
 

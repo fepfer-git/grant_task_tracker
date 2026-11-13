@@ -45,9 +45,11 @@ public sealed class GrantsController(GrantQueryService queries, GrantCommandServ
             return ValidationProblem(ModelState);
         }
 
-        var task = await commands.AddTaskAsync(
+        var result = await commands.AddTaskAsync(
             id, request.Id!.Value, request.Title ?? string.Empty, request.DueDate!.Value, request.Priority!.Value, cancellationToken);
-        return Created($"/grants/{id}", task);
+
+        // The same create sent again returns the task as it is now, with 200 (§6.3).
+        return result.Created ? Created($"/grants/{id}", result.Task) : Ok(result.Task);
     }
 
     /// <summary>

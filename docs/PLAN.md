@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 5 reviewed; Part 6 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 6 reviewed; Part 7 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -85,8 +85,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 3 | Clock: "today" in Sydney | Built, reviewed |
 | 4 | Infrastructure: database, dates, versions, seed data | Built, reviewed |
 | 5 | API: read endpoints, errors, start-up | Built, reviewed |
-| 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, waiting for review |
-| 7 | OP-2 retry and OP-3 safe task creation | Not started |
+| 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, reviewed |
+| 7 | OP-2 retry and OP-3 safe task creation | Built, waiting for review |
 | 8 | OP-5 health checks | Not started |
 | 9 | Swagger UI (Development only) | Not started |
 | 10 | UI foundation: app, API client, one test command | Not started |
@@ -893,7 +893,70 @@ Changes from the plan:
 | Don't retry on a primary-key violation | `Given_TwoIdenticalCreates_When_Racing_...` (it returns 500) |
 | Treat any existing id as a match | `..._SameIdSentWithDifferentDetails_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built:
+
+| File | What it holds |
+|---|---|
+| `src/GrantTracker.Api/Services/GrantCommandService.cs` | `WithRetryAsync`: runs load → domain method → save up to `MaxAttempts = 3` times, calling `ChangeTracker.Clear()` after each conflict so the next attempt loads current data. A conflict is a `DbUpdateConcurrencyException`, or a `DbUpdateException` whose inner SQLite error is a primary-key violation (extended code 1555) on an added `GrantTask`. Nothing else is retried. After the third conflict it throws `ConcurrencyConflictException`. All three writes run inside it. `AddTaskAsync` now follows §6.3: look up the id on any grant; the same grant, trimmed title, due date and priority → the existing task as it is now, with `Created = false`; anything different → `DuplicateTaskIdException`; a new id → `Grant.AddTask` (BR-1, BR-2, BR-3). Returns `CreateTaskResult(Task, Created)`. |
+| `src/GrantTracker.Api/Controllers/GrantsController.cs` | `POST /grants/{id}/tasks`: 201 with `Location` when created, 200 when the task already existed. |
+| `src/GrantTracker.Api/Errors/DuplicateTaskIdException.cs` | → 409 `duplicate-task-id`, "This task id is already used by a task with different details". |
+| `src/GrantTracker.Api/Errors/ConcurrencyConflictException.cs` | Wraps the last conflict after 3 attempts → 409 `concurrency-conflict`, "The record was changed by someone else. Reload and try again." It's what §5.1's "`DbUpdateConcurrencyException` after 3 attempts" row maps; it also covers the (unlikely) case where the third conflict was a primary-key violation. |
+| `src/GrantTracker.Api/Errors/ApiExceptionHandler.cs`, `ProblemTypes.cs` | The two mappings and their codes. Every §5.1 row is now mapped. |
+
+Test helper (`tests/GrantTracker.Tests/Api/CompetingSaveInterceptor.cs`): a `SaveChangesInterceptor` that the factory adds to every app DbContext (`factory.Race`). It does nothing until armed. Once armed, it runs a competing change just before the request under test saves: after the request has loaded its data, before its first save (or before every save, for the retry-limit test). The competing change is **another real request to the API**, so the other officer's side also goes through the endpoint, the domain and the version renewal. The request under test waits for it to finish, so they never use the one SQLite connection at the same moment. `RequestSaves` counts the request's save attempts. The plan named two interceptors; one with an "every save" switch does both jobs.
+
+Tests: 17 tests, 19 cases.
+
+| File | Test | Covers |
+|---|---|---|
+| `ConcurrencyRetryTests.cs` | `Given_TwoOfficersAddingTasksToSameGrant_When_Racing_Then_BothTasksAreSaved` (both 201; 2 save attempts; both tasks listed) | OP-2: no unnecessary 409 |
+| `ConcurrencyRetryTests.cs` | `Given_HighTaskAddedFirst_When_CloseRaces_Then_CloseReturns409Br5` (grant still Open) | OP-2 + BR-5 |
+| `ConcurrencyRetryTests.cs` | `Given_GrantClosedFirst_When_AddRaces_Then_AddReturns409Br1` (no task added) | OP-2 + BR-1 |
+| `ConcurrencyRetryTests.cs` | `Given_LowTaskAddedFirst_When_CloseRaces_Then_CloseSucceedsAndNewTaskIsCancelled` | OP-2 |
+| `ConcurrencyRetryTests.cs` | `Given_TaskCompletedFirst_When_CloseRaces_Then_CloseSucceedsAndCompletedTaskIsUntouched` (the other officer completes at 22:30 UTC; that `completedAtUtc` is kept, `cancelledAtUtc` null; the other task Cancelled) | OP-2 |
+| `ConcurrencyRetryTests.cs` | `Given_GrantClosedFirst_When_CompleteRaces_Then_CompleteReturns409GrantClosed` (task Cancelled, never completed) | OP-2 + §4.7 |
+| `ConcurrencyRetryTests.cs` | `Given_TaskCompletedFirst_When_SecondCompleteRaces_Then_Returns200WithFirstCompletedAtUtc` (`"2026-03-10T22:30:00Z"`, not this request's 22:00) | OP-2 + BR-4 |
+| `ConcurrencyRetryTests.cs` | `Given_GrantClosedFirst_When_SecondCloseRaces_Then_Returns200AndFirstNoteIsKept` | OP-2 + BR-5 |
+| `ConcurrencyRetryTests.cs` | `Given_ConflictOnEveryAttempt_When_ClosingGrant_Then_Returns409ConcurrencyConflictAfterThreeAttempts` (another officer adds a task before every save; `type`, `code`, title; exactly 3 attempts; grant still Open) | OP-2 retry limit |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreated_When_SameRequestIsSentAgain_Then_Returns200WithSameBodyAndOneTaskExists` (201 then 200, identical bodies) | OP-3 |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreated_When_SameIdSentWithPaddedTaskTitle_Then_Returns200` | OP-3: compared after trimming |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreated_When_SameIdSentWithDifferentDetails_Then_Returns409DuplicateTaskId` (Theory: title, due date, priority; the saved task is unchanged) | OP-3 |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreated_When_SameIdSentToAnotherGrant_Then_Returns409DuplicateTaskId` | OP-3 |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreatedDueToday_When_RepeatedAfterSydneyMidnight_Then_Returns200NotBr2` (clock moved to `2026-03-11T13:00Z`; the task is returned, now overdue) | OP-3: lookup before BR-2 |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreatedThenGrantClosed_When_Repeated_Then_Returns200NotBr1` (returned as Cancelled) | OP-3: lookup before BR-1 |
+| `SafeTaskCreationTests.cs` | `Given_TaskCreatedThenCompleted_When_Repeated_Then_Returns200WithCompletedTask` | OP-3 (§6.5) |
+| `SafeTaskCreationTests.cs` | `Given_TwoIdenticalCreates_When_Racing_Then_OneTaskExistsAndResponsesAre201And200` (the copy gets 201; this request's one save conflicts, the retry finds the task and returns 200 without saving; one task) | OP-3 + OP-2: the primary-key retry |
+
+Mutation checks. Each was applied, all tests were run, and the file was restored. Checks 7 to 13 were added to the plan's list.
+
+| # | Break | Tests that failed |
+|---|---|---|
+| 1 | Max attempts 3 → 1 | All 9 race tests and `Given_TwoIdenticalCreates_...` |
+| 2 | Don't clear the change tracker between attempts | 8 of the 9 race tests (all but the retry-limit test, which fails every attempt anyway) |
+| 3 | Move the id lookup after the rule checks | `..._RepeatedAfterSydneyMidnight_...`, `..._ThenGrantClosed_When_Repeated_...` |
+| 4 | Compare titles without trimming | `..._SameIdSentWithPaddedTaskTitle_...` |
+| 5 | Don't retry on a primary-key violation | `Given_TwoIdenticalCreates_When_Racing_...` (it returns 500). This also shows the race really takes the primary-key path, not only the version check. |
+| 6 | Treat any existing id as a match | `..._SameIdSentWithDifferentDetails_...` (all three cases), `..._SameIdSentToAnotherGrant_...` |
+| 7 | Grant not compared | `..._SameIdSentToAnotherGrant_...` |
+| 8 | Due date not compared | `..._SameIdSentWithDifferentDetails_...` (due date) |
+| 9 | Priority not compared | `..._SameIdSentWithDifferentDetails_...` (priority) |
+| 10 | `ConcurrencyConflictException` not mapped (500) | `Given_ConflictOnEveryAttempt_...` |
+| 11 | Max attempts 3 → 4 | `Given_ConflictOnEveryAttempt_...` (4 attempts) |
+| 12 | A repeat returns 201 instead of 200 | All six repeat tests |
+| 13 | `DuplicateTaskIdException` not mapped (500) | `..._SameIdSentWithDifferentDetails_...` (all three), `..._SameIdSentToAnotherGrant_...` |
+
+Found while writing the tests:
+- `FakeTimeProvider` can't move backwards, so the complete races can't have the other officer act at an earlier time. They act 30 minutes later instead (22:30 UTC). That's still the first completion saved, and it differs from this request's 22:00, so the test can tell whose time was kept.
+- `Given_TwoIdenticalCreates_...` first asserted 2 save attempts. The right number is 1: on the retry, the lookup finds the task and returns it without saving. The assertion and its comment were corrected.
+
+After restoring, `npm test` passed twice: 133 passed, 0 failed (114 from Parts 1 to 6, and 19 from Part 7). The Part 6 gap (a repeated create returned 500) is closed.
+
+Changes from the plan:
+- One interceptor instead of two (see the test helper above).
+- The competing change is a real API request rather than a direct DbContext change, so both sides of each race go through the endpoint.
+- New files not named in the plan: `DuplicateTaskIdException.cs`, `ConcurrencyConflictException.cs`, and the test files `ConcurrencyRetryTests.cs` and `SafeTaskCreationTests.cs`.
 
 ---
 

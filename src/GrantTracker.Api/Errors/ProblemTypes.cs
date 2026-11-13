@@ -21,6 +21,8 @@ public static class ProblemTypes
     public const string Validation = "validation";
     public const string NotFound = "not-found";
     public const string Internal = "internal";
+    public const string DuplicateTaskId = "duplicate-task-id";
+    public const string ConcurrencyConflict = "concurrency-conflict";
 
     /// <summary>The start of the links ASP.NET Core puts in <c>type</c> when it writes an error body itself.</summary>
     private const string FrameworkTypePrefix = "https://tools.ietf.org/";

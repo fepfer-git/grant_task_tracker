@@ -36,7 +36,13 @@ public sealed class GrantTrackerApiFactory : WebApplicationFactory<Program>
     /// <summary>The app's clock. Advance it to move time forward.</summary>
     public FakeTimeProvider Clock { get; } = new(PinnedInstant);
 
-    /// <summary>Changes data directly, for states the read endpoints need but no endpoint creates yet.</summary>
+    /// <summary>Added to every DbContext the app creates. Arm it to make a race happen (OP-2 tests).</summary>
+    public CompetingSaveInterceptor Race { get; } = new();
+
+    /// <summary>
+    /// Changes data directly through its own DbContext: for states no endpoint creates, and for the competing change
+    /// in a race.
+    /// </summary>
     public void UpdateDatabase(Action<AppDbContext> change)
     {
         using var scope = Services.CreateScope();
@@ -62,7 +68,7 @@ public sealed class GrantTrackerApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<DbContextOptions<AppDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
-            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
+            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection).AddInterceptors(Race));
 
             // Adds the test-only controllers, such as the endpoint that throws.
             services.AddControllers().AddApplicationPart(typeof(GrantTrackerApiFactory).Assembly);
