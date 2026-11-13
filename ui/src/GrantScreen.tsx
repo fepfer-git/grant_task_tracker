@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { completeTask, getGrant, listGrants } from './api/grants'
 import type { Grant, GrantListItem, GrantTask, ProblemDetails } from './api/types'
 import { AddTaskForm } from './AddTaskForm'
+import { CloseGrant } from './CloseGrant'
 import { formatCalendarDate } from './dates'
 import { ProblemMessage, ServerProblemBanner } from './ProblemMessage'
 import { TaskList } from './TaskList'
 
 /**
- * The one screen (CONTEXT §7): choose a grant, see its tasks with overdue ones highlighted, complete tasks and add
- * tasks. Every request goes through `apiFetch`, so each ends in success, an API error or a server problem (§6.3).
+ * The one screen (CONTEXT §7): choose a grant, see its tasks with overdue ones highlighted, complete and add tasks,
+ * and close the grant. Every request goes through `apiFetch`, so each ends in success, an API error or a server
+ * problem (§6.3).
  */
 export function GrantScreen() {
   const [grants, setGrants] = useState<GrantListItem[] | null>(null)
@@ -126,6 +128,17 @@ export function GrantScreen() {
               </>
             )}
           </dl>
+
+          <CloseGrant
+            key={grant.id}
+            grant={grant}
+            onClosed={(closed) => {
+              if (selectedIdRef.current === closed.id) {
+                setGrant(closed)
+              }
+            }}
+            onChanged={() => loadGrant(grant.id)}
+          />
 
           <TaskList grant={grant} completingTaskId={completingTaskId} onComplete={(task) => void handleComplete(task)} />
 

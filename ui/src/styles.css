@@ -101,3 +101,25 @@ fieldset {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+.close-grant {
+  margin: 1rem 0;
+}
+
+.hint {
+  color: #555555;
+  margin: 0.25rem 0 0;
+}
+
+.dialog {
+  border: 2px solid #1a1a1a;
+  padding: 1rem;
+  margin-top: 0.75rem;
+  max-width: 36rem;
+  background: #ffffff;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 0.5rem;
+}

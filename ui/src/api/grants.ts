@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { CreateTaskRequest, Grant, GrantListItem, GrantTask } from './types'
+import type { CloseGrantRequest, CreateTaskRequest, Grant, GrantListItem, GrantTask } from './types'
 
 // One function per endpoint the grant screen uses (DESIGN.md §5). Each returns an ApiResult and never throws.
 
@@ -13,3 +13,7 @@ export const addTask = (grantId: string, request: CreateTaskRequest) =>
 
 export const completeTask = (taskId: string) =>
   apiFetch<GrantTask>(`/tasks/${encodeURIComponent(taskId)}/complete`, { method: 'PUT' })
+
+/** 200 with the closed grant, also when it was already closed (BR-5). 409 BR-5 while a High task is pending. */
+export const closeGrant = (grantId: string, request: CloseGrantRequest) =>
+  apiFetch<Grant>(`/grants/${encodeURIComponent(grantId)}/close`, { method: 'PUT', body: request })

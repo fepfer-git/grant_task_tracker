@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 10 reviewed; Part 11 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 11 reviewed; Part 12 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -90,8 +90,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 8 | OP-5 health checks | Built, reviewed |
 | 9 | Swagger UI (Development only) | Built, reviewed |
 | 10 | UI foundation: app, API client, one test command | Built, reviewed |
-| 11 | UI: grant screen (tasks, Complete, Add task) | Built, waiting for review |
-| 12 | UI: close a grant | Not started |
+| 11 | UI: grant screen (tasks, Complete, Add task) | Built, reviewed |
+| 12 | UI: close a grant | Built, waiting for review |
 | 13 | Documentation: README and testing strategy | Not started |
 
 Parts 0 to 8, 10 and 11 cover what the spec requires. Parts 9 and 12 are spec extras that are in our design. Part 12 comes last among the code parts and can be dropped if time runs short.
@@ -1399,7 +1399,76 @@ Changes from the plan:
 | Enable Close despite a pending High task | `given a pending High task, ...` |
 | Don't show the 409 message | `given the API returns 409 BR-5, ...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built (`ui/src/`):
+- **`api/grants.ts`**: `closeGrant(grantId, { note? })` for `PUT /grants/{id}/close`.
+- **`CloseGrant.tsx`**: the Close button and its confirmation dialog. It's rendered in the grant section with `key={grant.id}`, so switching grants closes the dialog and clears the note.
+  - **Disabled Close button.** `closeBlockedReason(grant)` returns why Close can't be used:
+    - "This grant is already closed.";
+    - "This grant has N pending High-priority task(s). Complete it/them before closing the grant." N counts the grant's tasks that are Pending and High.
+
+    When there's a reason, Close is disabled and the reason is shown twice. It's the button's `title` (the tooltip). It's also a visible hint linked with `aria-describedby`, because some browsers don't show tooltips on disabled buttons.
+  - **The question.** `closeQuestion(grant)` uses `pendingTaskCount` from `GET /grants/{id}`:
+    - "Close grant GR-xxxx?" with none pending;
+    - "There is still 1 pending task. Closing the grant will cancel it. …" with one;
+    - "There are still N pending tasks. Closing the grant will cancel them. Do you still want to close the grant?" with more. The singular wording for one task is the only difference from DESIGN's text.
+  - **The dialog** is an inline `role="dialog"` panel, not an overlay. It has the question, an optional note (`textarea`, focused on open), "Yes, close the grant" and Cancel. Escape cancels. A `<fieldset>` disables the controls while the request waits.
+  - **Sending:** the note is trimmed, and an empty note sends `{}`.
+  - **Responses:**
+    - **200:** the dialog closes, and the screen shows the grant from the response (Closed, with its pending tasks Cancelled and the closing note). A repeated close also returns 200, so this covers a grant another officer already closed.
+    - **400 keyed on `note`:** shown on the note field.
+    - **Any other API error:** its `title` and `detail` are shown in the dialog.
+    - **After a 409:** the grant reloads, and the dialog stays open with the message. If the reloaded grant now has a pending High task, Close and the confirm button become disabled with the reason.
+    - **Server problem:** the banner text is shown inside the dialog, so the officer sees it next to the button, and the note is kept. Closing again is safe.
+- **`GrantScreen.tsx`** renders `CloseGrant` after the grant's details. A closed grant from the response is shown only if it's still the selected grant.
+- **`styles.css`**: styles for the hint, the dialog and its buttons.
+
+Tests (`ui/src/CloseGrant.test.tsx`, 9 tests, 10 cases), through the whole screen with `mockApi`:
+
+| Test | Covers |
+|---|---|
+| `given a pending High task, when the screen loads, then Close is disabled with the reason` | BR-5 in the UI: disabled, the reason as accessible description and as `title` |
+| `given a closed grant, when the screen loads, then Close is disabled` | §4.7, with the reason |
+| `given %i pending task(s), when clicking Close, then the dialog says they will be cancelled` (1 and 2) | BR-5 dialog: the dialog's accessible name is the question |
+| `given no pending tasks, when clicking Close, then the dialog asks for a plain confirmation` | BR-5 dialog |
+| `given the API returns 409 BR-5, when confirming, then its title and detail are shown and the grant reloads` | BR-5 from the API, OP-2: the reloaded grant shows the new High task, and the grant was fetched twice |
+| `given a note, when confirming, then the note is sent and the closed grant is shown` (added) | BR-5 close: the trimmed note is sent; the closing note, the Cancelled task and the disabled Close button are shown |
+| `given the API returns 400 keyed on note, when confirming, then the message is shown on the note field` (added) | Decision 13 (note over 1000 characters) |
+| `given no response within 10 seconds, when confirming, then the banner is shown, the note is kept and the button is enabled again` (added) | OP-3 for close |
+| `given the dialog is open, when cancelling, then the dialog closes and no request is sent` (added) | Cancel sends nothing |
+
+Mutation checks (all done, each restored afterwards; script `mutate_part12.sh` in the session scratchpad). Every break made the UI test run exit with code 1, and every run loaded all 4 test files, so no break garbled a file (the problem found in Part 11).
+
+| # | Break | Failing tests |
+|---|---|---|
+| 1 | Close enabled despite a pending High task (planned) | `given a pending High task, ...` |
+| 2 | The 409 message not shown (planned) | `given the API returns 409 BR-5, ...` |
+| 3 | Close enabled on a closed grant | `given a closed grant, ...`, `given a note, when confirming, ...` |
+| 4 | The dialog always asks the plain question | `given %i pending task(s), ...` (both cases) |
+| 5 | One pending task worded as plural | `given %i pending task(s), ...` (1) |
+| 6 | No reload after a 409 | `given the API returns 409 BR-5, ...` |
+| 7 | The note not trimmed | `given a note, when confirming, ...` |
+| 8 | The note not sent | `given a note, when confirming, ...` |
+| 9 | The closed grant from the response not shown | `given a note, when confirming, ...` |
+| 10 | No banner after a server problem | `given no response within 10 seconds, when confirming, ...` |
+| 11 | A note field error shown as a general message | `given the API returns 400 keyed on note, ...` |
+| 12 | Cancel submits the dialog | `given the dialog is open, when cancelling, ...` |
+| 13 | No tooltip on the disabled Close button | `given a pending High task, ...` |
+
+Manual checks, with the API on its `http` profile (scratch database) and the Vite dev server, through the dev server:
+- GR-100001: `PUT /close` returned 409 `BR-5` with `blockingTaskIds` = the pending High task.
+- GR-100002: with a note, it returned 200. The grant is Closed with the note, `pendingTaskCount` 0, and both tasks Cancelled. Closing it again with a different note returned 200 and kept the first note.
+- GR-100004: with an empty body, it returned 200, Closed, with no note.
+- `npm run build` succeeds; the output was deleted.
+- **I didn't click through the dialog in a browser** (no browser is available to me in this session). The behaviour is covered by the component tests above.
+
+Changes from the plan:
+- Four tests added, and eleven mutation checks.
+- One pending task is worded in the singular.
+- The dialog is inline, not an overlay.
+
+`npm test`: .NET 159 passed, UI 40 passed, on two runs. Type check: no errors.
 
 ---
 
