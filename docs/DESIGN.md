@@ -302,6 +302,8 @@ The check lives in the domain (`GrantTask.Complete` asks its grant), so every en
 
 Enums are stored as integers in the database (`GrantStatus`: `Open = 0`, `Closed = 1`; `TaskPriority`: `Low = 1`, `Medium = 2`, `High = 3`), but serialised as strings in JSON/API DTOs (`"Open"`, `"Closed"`, `"Low"`, `"Medium"`, `"High"`). `GrantTaskStatus` enum used in DTOs and domain logic is also mapped to strings (`"Pending"`, `"Completed"`, `"Cancelled"`). `DateOnly` is serialised as `"YYYY-MM-DD"`. `DateTime` values are ISO 8601 UTC with a `Z` suffix; the UTC converter (§3.6) makes sure values read from SQLite keep it. The UI treats `"YYYY-MM-DD"` values as plain text: it never turns them into a JavaScript `Date`, which would read them as midnight UTC and show the previous day in time zones west of UTC.
 
+An enum in a request must be its name: a number such as `3` is a 400, not `High`. Numbers are read only from JSON numbers, never from strings. The OpenAPI document uses the same JSON settings, so it describes enums by name, dates as `format: date`, and counts as integers, which is what the API sends.
+
 ### 5.1 Error handling
 
 One exception-handling middleware, using ASP.NET Core's `UseExceptionHandler` + `IExceptionHandler` + `AddProblemDetails`, catches everything thrown by controllers and services and writes an RFC 9457 body:

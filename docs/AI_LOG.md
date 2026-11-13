@@ -71,6 +71,12 @@
 |---|---|---|
 | Part 6 reported as Built, with 17 mutation checks all caught. `POST /grants/{id}/tasks` checks that `id`, `dueDate` and `priority` are present, but only the `id` check had a test. The Part 5 list test's only zero `pendingTaskCount` came from a grant whose task was completed. | The user asked whether a missing `dueDate` or `priority` was tested, and suggested a list test with cancelled tasks. Checked by mutation: removing the `dueDate` check, removing the `priority` check, or counting cancelled tasks as pending all passed every test. Without the checks, a missing value returned a 500. My mutation list had covered the `id` check and missed the other two. | Added `Given_MissingTaskTitleDueDateOrPriority_When_PostingTask_Then_Returns400KeyedOnField` (5 cases, including a missing `title`) and `Given_GrantClosedWithCancelledTasks_When_ListingGrants_Then_PendingTaskCountIsZero`. Mutation checks 18 to 20 now fail them. Part 6 build record updated. |
 
+### 2026-11-13: Part 9 (Swagger UI, Development only)
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Part 9 reported as Built. The planned `Given_ProductionEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404` was the only test of "Development only", and its mutation check replaced the condition with one that's true in every environment. | The user asked whether the tests catch the `IsDevelopment()` check being removed, and said the tests seemed to still pass. Deleting the check (three ways: the `if` line only, the `if` and its braces, `if (true)`) failed the test each time, so that case was covered. But the test checked only `Production`, so `if (!app.Environment.IsProduction())` or `IsDevelopment() \|\| IsStaging()` passed every test while exposing the document and Swagger UI in Staging and other environments. | The test became `Given_NonDevelopmentEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404`, covering `Production`, `Staging` and a custom `Uat`, each with the three paths (9 cases). Mutation checks 9 to 12 were added, and all of them fail it. Part 9 build record updated. |
+
 ## Prompt log
 
 ### 2026-11-11 01:49 (+07:00)
@@ -203,3 +209,24 @@
 ### 2026-11-13 15:50 (+07:00)
 
 > I accept, please move to the next phase.
+
+### 2026-11-13 16:12 (+07:00)
+
+> I accept. Please move to part 9.
+
+### 2026-11-13 16:33 (+07:00)
+
+> Can you help me check this: 
+>
+>
+> ```
+> // API documentation (DESIGN.md §5): in Development only, so the API isn't described publicly.
+> if (app.Environment.IsDevelopment())
+> {
+>     app.MapOpenApi();
+>     app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/v1.json", "Grant Task Tracker API"));
+> }
+> ```
+>
+>
+> Do the test case cover the case where someone accidently remove the isdevelopment? Will the swager json and ui be expose to public? And can test cases cover that? I tested and see it seems like the test still pass.

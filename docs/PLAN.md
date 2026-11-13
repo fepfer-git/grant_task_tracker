@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 7 reviewed; Part 8 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 8 reviewed; Part 9 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -87,8 +87,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 5 | API: read endpoints, errors, start-up | Built, reviewed |
 | 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, reviewed |
 | 7 | OP-2 retry and OP-3 safe task creation | Built, reviewed |
-| 8 | OP-5 health checks | Built, waiting for review |
-| 9 | Swagger UI (Development only) | Not started |
+| 8 | OP-5 health checks | Built, reviewed |
+| 9 | Swagger UI (Development only) | Built, waiting for review |
 | 10 | UI foundation: app, API client, one test command | Not started |
 | 11 | UI: grant screen (tasks, Complete, Add task) | Not started |
 | 12 | UI: close a grant | Not started |
@@ -1040,15 +1040,72 @@ Changes from the plan: none to the behaviour. Four mutation checks were added to
 | Test | Covers |
 |---|---|
 | `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_ListsEveryEndpoint` | §5 endpoints documented |
-| `Given_ProductionEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404` (Theory) | Development only, so the API isn't described publicly |
+| `Given_NonDevelopmentEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404` (Theory; named `Given_ProductionEnvironment_...` before the review, see the build record) | Development only, so the API isn't described publicly |
 
 **Mutation checks:**
 
 | Break | Expected failing test |
 |---|---|
-| Map Swagger in every environment | `Given_ProductionEnvironment_...` |
+| Map Swagger in every environment | `Given_NonDevelopmentEnvironment_...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built:
+- Packages in `GrantTracker.Api`:
+  - `Microsoft.AspNetCore.OpenApi` 10.0.15.
+  - `Swashbuckle.AspNetCore.SwaggerUI` 10.3.1, the latest 10.x release (2026-10-19). 11.0 came out on 2026-11-10, too new to take.
+- `Program.cs`: `AddOpenApi()`. In Development only, `MapOpenApi()` (`/openapi/v1.json`) and `UseSwaggerUI` at `/swagger`, pointing to that document.
+- The first generated document didn't match the JSON the API sends. Four fixes:
+  - **Enums were `integer`.** The OpenAPI generator (and the ProblemDetails writer) read the minimal-API JSON options, not the controllers' options, where the string-enum converter was. A local function `ConfigureJson` now sets the API's JSON settings, and `Program.cs` applies it to both (`AddJsonOptions` and `ConfigureHttpJsonOptions`).
+  - **Counts were "integer or string"**, because the web defaults allow reading numbers from strings. `ConfigureJson` sets `NumberHandling = Strict`. No request has a number field, so no request behaves differently. Added to DESIGN §5.
+  - **`CloseGrantRequest.note` was marked required.** The record's parameter now has a default (`string? Note = null`), which is what the generator reads as optional. Binding doesn't change.
+  - **`POST /grants/{id}/tasks` was documented as 200 only.** `[ProducesResponseType<TaskDto>]` for 201 and 200 on the action.
+- `ThrowingTestController` (tests) has `[ApiExplorerSettings(IgnoreApi = true)]`, so the test-only endpoint isn't in the document the tests read.
+
+Tests (`tests/GrantTracker.Tests/Api/OpenApiTests.cs`, 7 tests, 21 cases). The test app runs in Development (the `WebApplicationFactory` default); the non-Development test sets the environment.
+
+| Test | Covers |
+|---|---|
+| `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_ListsEveryEndpoint` | §5: the exact set of 6 operations (method and path) |
+| `Given_NonDevelopmentEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404` (Theory: each of `Production`, `Staging` and a custom `Uat`, with each of `/openapi/v1.json`, `/swagger`, `/swagger/index.html`; 9 cases) | Development only: every other environment, not only Production |
+| `Given_DevelopmentEnvironment_When_GettingSwaggerUi_Then_ReturnsThePage` (added) | Swagger UI is served in Development |
+| `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_EnumIsDescribedByName` (Theory, added: `GrantStatus`, `GrantTaskStatus`, `TaskPriority`) | §5: enums as names |
+| `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_PropertyIsDescribedAsSent` (Theory, added: `TaskDto.dueDate`, `CreateTaskRequest.dueDate`, `GrantDto.applicationDate`, `GrantDto.today`, `GrantDto.pendingTaskCount`) | §5: `DateOnly` as `format: date`; counts as integers. Expected schemas are literal JSON. |
+| `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_CloseNoteIsOptional` (added) | BR-5 close body: `note` optional |
+| `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_AddTaskListsCreatedAndOk` (added) | §6.3: 201 for a new task, 200 for a repeat |
+
+Mutation checks (all done, each restored afterwards; script `mutate_part9.sh` in the session scratchpad):
+
+| # | Break | Failing tests |
+|---|---|---|
+| 1 | The document and Swagger UI mapped in every environment (planned) | `Given_NonDevelopmentEnvironment_...` (all 9 cases) |
+| 2 | Only the document mapped in every environment | `Given_NonDevelopmentEnvironment_...` (the 3 `/openapi/v1.json` cases) |
+| 3 | Swagger UI not added | `Given_DevelopmentEnvironment_When_GettingSwaggerUi_Then_ReturnsThePage` |
+| 4 | `ConfigureHttpJsonOptions` removed | `..._Then_EnumIsDescribedByName` (3 cases), `..._Then_PropertyIsDescribedAsSent` (`pendingTaskCount`) |
+| 5 | `NumberHandling = Strict` removed | `..._Then_PropertyIsDescribedAsSent` (`pendingTaskCount`) |
+| 6 | `allowIntegerValues: false` removed (moved into `ConfigureJson`, so checked again) | `CreateTaskEndpointTests.Given_UnknownPriorityOrMalformedDate_..._Then_Returns400KeyedOnField` (Part 6) |
+| 7 | The note's default removed | `..._Then_CloseNoteIsOptional` |
+| 8 | The 201 response attribute removed | `..._Then_AddTaskListsCreatedAndOk` |
+| 9 | The `if` line deleted, keeping the block (added after review) | `Given_NonDevelopmentEnvironment_...` (all 9 cases) |
+| 10 | The `if` and both braces deleted (added after review) | `Given_NonDevelopmentEnvironment_...` (all 9 cases) |
+| 11 | `if (!app.Environment.IsProduction())` (added after review) | `Given_NonDevelopmentEnvironment_...` (6 Staging and Uat cases). Passed every test before the review. |
+| 12 | `if (app.Environment.IsDevelopment() || app.Environment.IsStaging())` (added after review) | `Given_NonDevelopmentEnvironment_...` (3 Staging cases). Passed every test before the review. |
+
+Manual check against the real app on a scratch database:
+- In Development, `/swagger/index.html` returned 200 and its configuration points to `/openapi/v1.json`.
+- `GET /grants` returned the seed grants, and `POST` of a task on GR-100001 returned 201. These are the same calls Swagger UI's "Try it out" sends. I didn't click through the page in a browser.
+- In Production, `/openapi/v1.json` and `/swagger/index.html` returned 404, while `/grants` still returned 200.
+- The scratch files were deleted afterwards.
+
+Not done, open for review: the document describes only success responses. The error responses (§5.1 ProblemDetails with 400, 404 and 409) aren't listed.
+
+Changes from the plan:
+- Five tests were added to the two planned ones, for the four fixes and for the Swagger page.
+- After review: the planned `Given_ProductionEnvironment_...` test checked only `Production`, so mutations 11 and 12 passed every test. It became `Given_NonDevelopmentEnvironment_...`, which also checks `Staging` and a custom environment name. Logged as a correction.
+- The JSON settings were moved into `ConfigureJson`, and `NumberHandling` is new.
+- No new source file.
+
+`npm test`: 159 passed (138 before, plus 21 cases), on two runs. Build: 0 warnings.
 
 ---
 

@@ -23,6 +23,8 @@ public sealed class GrantsController(GrantQueryService queries, GrantCommandServ
     /// Adds a task. 201 with <c>Location</c> pointing to the grant, because there is no endpoint for a single task
     /// </summary>
     [HttpPost("{id:guid}/tasks")]
+    [ProducesResponseType<TaskDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType<TaskDto>(StatusCodes.Status200OK)]
     public async Task<ActionResult<TaskDto>> AddTask(Guid id, CreateTaskRequest request, CancellationToken cancellationToken)
     {
         if (request.Id is null || request.Id == Guid.Empty)
