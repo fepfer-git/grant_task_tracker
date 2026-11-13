@@ -525,7 +525,7 @@ The spec's seed has no Cancelled task. GR-100003 only has a completed task, so t
 
 ## 9. Testing strategy
 
-**One command runs everything, and it must pass every time:** `npm test` at the repository root. A root `package.json` script runs `dotnet test` (using the solution file), then the UI's Vitest tests. `dotnet test` alone doesn't run Vitest.
+**One command runs everything, and it must pass every time:** `npm test` at the repository root. A root `package.json` script runs `dotnet test` (using the solution file), then the UI's Vitest tests. `dotnet test` alone doesn't run Vitest. `npm install` at the root also installs the UI's packages (a `postinstall` script), so a fresh clone needs only `npm install` and then `npm test`.
 - **Why a root `package.json`:** it works the same on Windows, macOS and Linux, and it needs only Node and .NET, which are already needed to run the app.
 - **Rejected:** an MSBuild target that makes `dotnet test` also run the UI tests hides a Node dependency inside the .NET build, breaks test runs from the IDE on machines without Node, and slows every build. Separate `test.ps1` and `test.sh` scripts would be two files to keep the same.
 
@@ -679,3 +679,15 @@ The spec mentions officers working in several regional offices (§2, OP-2), but 
 - **Decision:** Keep the placeholder URIs and the `code` field, and don't build documentation pages in this version. Following the RFC fully means hosting a page for every problem type, which is outside the scope of this exercise.
 - **Why it's acceptable for now:** `.example` is reserved for documentation (RFC 2606), so the address can never lead to someone else's site. Clients are told not to open `type` URIs automatically anyway. `type` and `code` are built from the same value and always correspond one to one, so identifying by `code` gives the same answer as identifying by `type`.
 - **The ideal way:** Publish our own help page for each problem type (for example `https://<our docs site>/problems/BR-1`) explaining what happened and what the officer can do, and change the base URI to that site. The `code` values and the UI wouldn't need to change.
+
+### 10.9 The OpenAPI document lists only success responses (limitation, to revisit)
+- **Situation:** The OpenAPI document and Swagger UI (Development only, §5) describe each endpoint's success response: 200, plus 201 for `POST /grants/{id}/tasks`. The error responses aren't listed, so Swagger UI doesn't show them:
+  - 400 for validation;
+  - 404 for an unknown id;
+  - 409 for BR-1, BR-5, `grant-closed`, `duplicate-task-id` and `concurrency-conflict`;
+  - 500 for an unexpected error.
+
+  All of them return the ProblemDetails body of §5.1.
+- **Decision:** Keep the document to success responses for now. The user will review whether to add the error responses.
+- **Why it's acceptable for now:** The document is a development aid, not a published contract. §5 and §5.1 list every status code and `code` for each endpoint, and the tests check them. The API behaves the same either way; only the description is incomplete.
+- **If we add them:** Put `[ProducesResponseType<ProblemDetails>(...)]` for each error status on each action, matching the §5 table, or add a document transformer that adds them from one place. Add an `OpenApiTests` case per endpoint so the document can't drift from §5.

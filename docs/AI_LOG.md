@@ -230,3 +230,14 @@
 >
 >
 > Do the test case cover the case where someone accidently remove the isdevelopment? Will the swager json and ui be expose to public? And can test cases cover that? I tested and see it seems like the test still pass.
+
+### 2026-11-13 16:55 (+07:00)
+
+> For this one: 
+>
+>
+> ```
+> Decision for you: the document lists only the success responses, not the error responses (400, 404 and 409). I can add those, or you can treat this as a known gap. I’ve recorded it in the build record in docs/PLAN.md; your prompt is logged in docs/AI_LOG.md.
+> ```
+>
+> Please record it inthe consideration, I will take a look. then move to next part.

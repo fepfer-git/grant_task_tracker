@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 8 reviewed; Part 9 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 9 reviewed; Part 10 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -88,8 +88,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 6 | API: write endpoints (BR-1 to BR-5 through the API) | Built, reviewed |
 | 7 | OP-2 retry and OP-3 safe task creation | Built, reviewed |
 | 8 | OP-5 health checks | Built, reviewed |
-| 9 | Swagger UI (Development only) | Built, waiting for review |
-| 10 | UI foundation: app, API client, one test command | Not started |
+| 9 | Swagger UI (Development only) | Built, reviewed |
+| 10 | UI foundation: app, API client, one test command | Built, waiting for review |
 | 11 | UI: grant screen (tasks, Complete, Add task) | Not started |
 | 12 | UI: close a grant | Not started |
 | 13 | Documentation: README and testing strategy | Not started |
@@ -1097,7 +1097,7 @@ Manual check against the real app on a scratch database:
 - In Production, `/openapi/v1.json` and `/swagger/index.html` returned 404, while `/grants` still returned 200.
 - The scratch files were deleted afterwards.
 
-Not done, open for review: the document describes only success responses. The error responses (§5.1 ProblemDetails with 400, 404 and 409) aren't listed.
+Not done: the document describes only success responses; the error responses (§5.1 ProblemDetails with 400, 404 and 409) aren't listed. Recorded as DESIGN §10.9 for the user to review.
 
 Changes from the plan:
 - Five tests were added to the two planned ones, for the four fixes and for the Swagger page.
@@ -1144,7 +1144,77 @@ Changes from the plan:
 | Timeout of 1 second | `given a response just before 10 seconds, ...` |
 | Parse `dueDate` with `new Date()` | `given a grant response, ... exact strings sent` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+What was built:
+- **`ui/`**: a Vite React TypeScript app.
+  - Started from `create-vite` 9.3.3 (`react-ts` template). Removed from the template: the demo page, its CSS, the images and logos (`src/assets/`, `public/`), the template README, its `.gitignore` (the root one covers `node_modules/`), and the oxlint setup (not in our design).
+  - Kept: `index.html` (title "Grant Task Tracker", no favicon), `tsconfig.json`, `tsconfig.app.json` and `tsconfig.node.json`, with `"strict": true` added explicitly to both.
+  - `src/main.tsx` and a placeholder `src/App.tsx` (a heading only; the grant screen is Part 11).
+- **Package versions**, pinned exactly, each at least two weeks old:
+  - `react` and `react-dom` 19.3.1, `@types/react` and `@types/react-dom` 19.3.0, `@types/node` 24.19.2;
+  - `vite` 8.3.5, `@vitejs/plugin-react` 6.1.2, `typescript` 7.0.2 (the template's version);
+  - `vitest` 5.0.5, `jsdom` 30.1.3.
+
+  Newer releases from the last two weeks were skipped (vite 8.3.8, vitest 5.1.0, jsdom 31). React Testing Library and user-event come in Part 11, where they're first used.
+- **`src/api/types.ts`**: the §5 DTOs.
+  - `GrantListItem`, `Grant`, `GrantTask`, `OverdueTask`, `CreateTaskRequest`, `CloseGrantRequest` and `ProblemDetails` (with `code`, `errors` and `blockingTaskIds`).
+  - Calendar dates use the `CalendarDate` alias of `string`, documented as never becoming a `Date`. Instants use `UtcInstant`.
+- **`src/api/client.ts`**: `apiFetch<T>(path, { method, body })`.
+  - It never throws. It returns `success` (2xx with the parsed body), `api-error` (4xx with ProblemDetails) or `server-problem` (5xx, a network error, or a timeout, with the reason).
+  - An `AbortController` aborts after `REQUEST_TIMEOUT_MS` = 10,000. Reading the body counts toward the timeout.
+  - A 4xx whose body isn't JSON still gives a ProblemDetails with the status and status text.
+  - The JSON is parsed with no reviver, so dates stay strings.
+- **`vite.config.ts`**:
+  - The dev server forwards `/grants` and `/tasks` to `http://localhost:5038` (the API's `http` profile).
+  - The Vitest settings: `jsdom`, `unstubGlobals`, `restoreMocks`.
+  - `process.env.TZ = 'America/Los_Angeles'` is set at the top, so the test processes inherit it.
+- **Root `package.json`**:
+  - `test` is `dotnet test GrantTracker.slnx && npm --prefix ui test` (`vitest run`). If the .NET tests fail, the command stops there and fails.
+  - Added: `postinstall` runs `npm --prefix ui install`, so root `npm install` sets up the UI. npm also wrote a small root `package-lock.json` (no dependencies). Added to DESIGN §9.
+- **Root `.gitignore`**: adds `dist/` (the UI's build output).
+
+Tests (`ui/src/api/client.test.ts`, 9 tests). `fetch` is replaced with `vi.stubGlobal` in every test, and fake timers drive the timeout. The timeout tests record the result when the promise settles, so a broken timeout fails the test instead of hanging it.
+
+| Test | Covers |
+|---|---|
+| `given a 200 response, when fetching, then returns success with the parsed body` | §6.3 table |
+| `given a 400 ProblemDetails with errors, when fetching, then returns an API error with field errors` | §6.3: BR-2 and BR-3 reach the form |
+| `given a 409 ProblemDetails, when fetching, then returns an API error with title and detail` | §6.3: BR-1, BR-5 and others |
+| `given a 500 response, when fetching, then returns a server problem` | OP-3 |
+| `given fetch rejects, when fetching, then returns a server problem` | OP-3 network error |
+| `given no response within 10 seconds, when fetching, then aborts and returns a server problem` | OP-3 timeout: checked at exactly 10,000 ms, and the request's signal is aborted |
+| `given a response just before 10 seconds, when fetching, then returns success` | OP-3 timeout boundary (9,999 ms) |
+| `given a grant response, when fetching, then dueDate and today stay as the exact strings sent` | §5: `today`, `applicationDate` and `dueDate` stay strings |
+| `given the test setup, when reading the time zone, then it is America/Los_Angeles` (added) | §9: proves that the test processes really run west of UTC, which the Part 11 date tests depend on |
+
+Mutation checks (all done, each restored afterwards; script `mutate_part10.sh` in the session scratchpad). Each one was run through the root `npm test`, and its exit code was recorded:
+
+| # | Break | Failing tests | `npm test` exit code |
+|---|---|---|---|
+| 1 | The timer doesn't abort the request (planned) | `given no response within 10 seconds, ...` | 1 |
+| 2 | 5xx treated as an API error (planned) | `given a 500 response, ...` | 1 |
+| 3 | Timeout of 1 second (planned) | `given a response just before 10 seconds, ...` | 1 |
+| 4 | The JSON parsed with a reviver that turns `"YYYY-MM-DD"` into `new Date()` (planned) | `given a grant response, ... exact strings sent` | 1 |
+| 5 | Timeout of 11 seconds | `given no response within 10 seconds, ...` | 1 |
+| 6 | A 4xx body is ignored | `given a 400 ...`, `given a 409 ...` | 1 |
+| 7 | A timeout is reported as a network error | `given no response within 10 seconds, ...` | 1 |
+| 8 | The `TZ` line removed from `vite.config.ts` | `given the test setup, when reading the time zone, ...` (this machine is at +07:00) | 1 |
+| 9 | A .NET test fails (`MaxAttempts = 1`) | 10 .NET tests (Part 7) | 1 |
+
+On the first run, mutation 4 survived. Its regex was mangled when the script applied it (`\d` became `d`), so it never matched a date. Rewritten with `[0-9]`, it fails the test. During that investigation a restore went to the wrong path. I noticed it and restored `client.ts` from the backup before running anything else.
+
+Manual checks:
+- `npm run build` (`tsc -b && vite build`) succeeds. The output folder was deleted afterwards.
+- With the API on its `http` profile (scratch database) and the Vite dev server running, the page served "Grant Task Tracker". `/grants` through the dev server returned the seed grants, and `/tasks/overdue` returned 200. Both servers were stopped and the scratch files deleted.
+- A clean start: deleted `ui/node_modules`, ran root `npm install` (which installed the UI's 81 packages), then root `npm test`. Both suites passed, exit code 0.
+
+Changes from the plan:
+- One test added (the time zone guard), and five mutation checks.
+- Root `postinstall` and `package-lock.json`.
+- The template's oxlint setup was removed.
+
+`npm test`: .NET 159 passed, UI 9 passed, on two runs. Type check (`tsc -b`): no errors.
 
 ---
 

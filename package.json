@@ -2,6 +2,7 @@
   "name": "grant-task-tracker",
   "private": true,
   "scripts": {
-    "test": "dotnet test GrantTracker.slnx"
+    "postinstall": "npm --prefix ui install",
+    "test": "dotnet test GrantTracker.slnx && npm --prefix ui test"
   }
 }
