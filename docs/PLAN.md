@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 9 reviewed; Part 10 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 10 reviewed; Part 11 built, waiting for review.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -89,8 +89,8 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 7 | OP-2 retry and OP-3 safe task creation | Built, reviewed |
 | 8 | OP-5 health checks | Built, reviewed |
 | 9 | Swagger UI (Development only) | Built, reviewed |
-| 10 | UI foundation: app, API client, one test command | Built, waiting for review |
-| 11 | UI: grant screen (tasks, Complete, Add task) | Not started |
+| 10 | UI foundation: app, API client, one test command | Built, reviewed |
+| 11 | UI: grant screen (tasks, Complete, Add task) | Built, waiting for review |
 | 12 | UI: close a grant | Not started |
 | 13 | Documentation: README and testing strategy | Not started |
 
@@ -1265,7 +1265,111 @@ Changes from the plan:
 | Format the due date through `new Date()` | `given a task due "2026-03-11", ...` |
 | Compare the due date with `<=` instead of `<` | `given a due date equal to today, ...` |
 
-**Build record:** _not built yet._
+**Build record:** Built on 2026-11-13.
+
+Decision made during the build (asked, answered "New id"): after a 409 `duplicate-task-id`, the form takes a new task id and keeps the typed values, and the grant reloads. Added to DESIGN §6.3 and §6.5 and as Decision 15.
+
+What was built (`ui/src/`):
+
+| File | What it does |
+|---|---|
+| `api/grants.ts` | One function per endpoint the screen uses: `listGrants`, `getGrant`, `addTask`, `completeTask`. Each one calls `apiFetch`. |
+| `dates.ts` | `formatCalendarDate("2026-03-11")` returns "11 March 2026", built from the text, never through `Date`. |
+| `ProblemMessage.tsx` | `ProblemMessage` (an API error's `title` and `detail`, `role="alert"`), `ServerProblemBanner`, and the §6.3 banner text. |
+| `TaskList.tsx` | The tasks table: title, due date, priority, status. An overdue row (`isOverdue` from the API) gets the `overdue` class and an "Overdue" label, so it doesn't rely on colour alone. A Complete button (named "Complete <title>") is shown only on pending tasks of open grants, and is disabled while its request waits. |
+| `AddTaskForm.tsx` | The Add task form. Details below. |
+| `GrantScreen.tsx` | Loads `GET /grants` and selects the first grant. The grant drop-down shows "reference – organisation". Details below. |
+| `App.tsx`, `styles.css` | `App` renders `GrantScreen`. Plain styles: the banner, error boxes and the overdue row. |
+| `test/setup.ts`, `test/mockApi.ts` | Test support. `setup.ts` loads the jest-dom matchers and cleans up after each test. `mockApi` replaces `fetch`: it answers `GET /grants` and `GET /grants/{id}` from the test's own data, passes other requests to the test's handler, and records every request. |
+
+`AddTaskForm.tsx`:
+- **Client-side checks**, with the API's messages:
+  - title trimmed, required, at most 100 characters (`.length`);
+  - due date required, not before the API's `today`, and not before the application date, compared as `"YYYY-MM-DD"` strings.
+- **The task id** comes from `crypto.randomUUID()`. It's kept after a failure, replaced after a success, and replaced after `duplicate-task-id`.
+- **Switching grants** remounts the form (`key={grant.id}`), so a different grant always starts a fresh form with a fresh id.
+- **While waiting:** a `<fieldset>` disables every control, including the submit button, while the request waits and when the grant is closed.
+- **400 errors** are shown on their fields. A 400 keyed on `id`, or any other API error, shows the `title` and `detail`.
+- **After a 409** the grant reloads.
+- **A server problem** shows the banner and keeps the typed values.
+- **After a success** the form clears, a "Task "…" added." status appears, and the grant reloads.
+
+`GrantScreen.tsx`:
+- Shows the grant's status, application date, pending count and closing note, then the task list and the form.
+- Complete: success reloads the grant; an API error shows its title and detail (and reloads after a 409); a server problem shows the banner.
+- A response for a grant the officer has switched away from is ignored.
+- Starting a new request clears an old banner and message.
+
+Packages added (dev only, exact, each at least two weeks old): `@testing-library/react` 16.3.3, `@testing-library/dom` 10.4.2, `@testing-library/user-event` 14.6.8, `@testing-library/jest-dom` 7.0.1. `vite.config.ts` gains `setupFiles`.
+
+Tests: `ui/src/GrantScreen.test.tsx` (5 tests) and `ui/src/AddTaskForm.test.tsx` (13 tests, 16 cases). Together with Part 10's 9 tests, the UI has 30 test cases.
+- The form is tested through the whole screen, as an officer uses it.
+- Due dates are set with a change event, as a browser's date picker sets them. The title is typed or pasted with user-event.
+- The timeout tests use fake timers that also follow real time (`shouldAdvanceTime`), so Testing Library's waiting still works. The 10 seconds are advanced explicitly.
+
+| Test | Covers |
+|---|---|
+| `given a grant with an overdue task, when the screen loads, then the task is highlighted as overdue` | BR-6 in the UI: the class and the label on the overdue row only |
+| `given a task due "2026-03-11", when the screen loads, then the due date shown is 11 March 2026` | §5: no day shift (America/Los_Angeles) |
+| `given pending and completed tasks on an open grant, when the screen loads, then only pending tasks have a Complete button` | BR-4 in the UI |
+| `given a closed grant, when the screen loads, then the Add task form is disabled and there are no Complete buttons` | BR-1, §4.7. The fixture includes a Pending task on the closed grant, which real data can't have, so the test checks the UI's own "open grants only" rule. |
+| `given the API returns 500, when completing a task, then the banner is shown` | OP-3; the button is enabled again |
+| `given %s, when submitting, then shows a title error and sends no request` (empty, whitespace-only, 101 characters) | BR-3 client-side check, as the title field's accessible description |
+| `given a 100-character title, when submitting, then the request is sent` (added) | BR-3 boundary on the client |
+| `given a due date %s, when submitting, then shows a due date error and sends no request` (before today; before the application date) | BR-2 client-side check, using the API's `today`. The second case uses an application date after today, which isn't realistic but is the only way to test that check on its own. |
+| `given a due date equal to today, when submitting, then the request is sent` | BR-2 boundary on the client |
+| `given the API returns 400 keyed on dueDate, when submitting, then the message is shown on the due date field` | BR-2 from the API |
+| `given the API returns 409 BR-1, when submitting, then its title and detail are shown` | BR-1 from the API |
+| `given the API returns 409, when submitting, then the grant is reloaded` (added) | §6.3: after any 409 the screen shows the current state (the reloaded grant is closed, so the form becomes disabled) |
+| `given no response within 10 seconds, when submitting, then the banner is shown, the values are kept and the button is enabled again` | OP-3 |
+| `given a timeout, when sending again, then the same task id is sent` | OP-3 safe resend |
+| `given a successful create, when adding the next task, then a new task id is used` | OP-3: no accidental reuse of an id |
+| `given a successful create, when the response arrives, then the form clears and the grant reloads with the new task` (added) | §6.3: reload after success |
+| `given the API returns 409 duplicate-task-id, when sending again, then a new task id is used and the values are kept` (added) | Decision 15 |
+| `given a request is waiting, when clicking Add twice, then one request is sent` | OP-3 double-click |
+
+Mutation checks (all done, each restored afterwards; script `mutate_part11.sh` in the session scratchpad). Every break made the UI test run exit with code 1.
+
+| # | Break | Failing tests |
+|---|---|---|
+| 1 | A new id on every submit (planned) | `given a timeout, when sending again, then the same task id is sent` |
+| 2 | The id kept after a success (planned) | `given a successful create, when adding the next task, ...` |
+| 3 | The form not disabled while waiting (planned) | `given a request is waiting, when clicking Add twice, ...` |
+| 4 | `isOverdue` ignored (planned) | `given a grant with an overdue task, ...` |
+| 5 | The due date formatted through `new Date(...).toLocaleDateString` (planned) | `given a task due "2026-03-11", ...` |
+| 6 | Due date compared with `<=` instead of `<` (planned) | `given a due date equal to today, ...` |
+| 7 | Title length compared with `>=` instead of `>` | `given a 100-character title, ...` |
+| 8 | Title not trimmed before the checks | `given a whitespace-only title, ...` |
+| 9 | Application date check switched off | `given a due date before the application date, ...` |
+| 10 | Complete shown on closed grants | `given a closed grant, ...` |
+| 11 | Complete shown for every task status | `given pending and completed tasks on an open grant, ...` |
+| 12 | The form not disabled for a closed grant | `given a closed grant, ...`, `given the API returns 409, when submitting, then the grant is reloaded` |
+| 13 | No reload after a 409 on create | `given the API returns 409, when submitting, then the grant is reloaded` |
+| 14 | No banner when Complete gets a 500 | `given the API returns 500, when completing a task, ...` |
+| 15 | The typed values cleared after a server problem | `given no response within 10 seconds, ...`, `given a timeout, when sending again, ...` |
+| 16 | The id kept after `duplicate-task-id` | `given the API returns 409 duplicate-task-id, ...` |
+| 17 | API field errors shown as a general message instead | `given the API returns 400 keyed on dueDate, ...` |
+| 18 | No reload after a successful create | `given a successful create, when the response arrives, ...` |
+
+On the first run, mutations 3 and 12 didn't give a real result: only Part 10's 9 tests ran. Their patterns contained `||`, and with `|` as the substitution delimiter, Perl read the escaped `\|` as regex alternation, so the source file was mangled and the two component test files didn't load. With `#` as the delimiter, both mutations apply as intended and are caught (results above). The source was confirmed restored afterwards.
+
+Manual checks:
+- With the API on its `http` profile (scratch database, seeded with today = 2026-11-13) and the Vite dev server running, the dev server served the new modules.
+- Through the dev server's forwarding:
+  - `GET /grants` returned GR-100001 to GR-100004;
+  - GR-100001's "Verify bank details" had `isOverdue: true`;
+  - a create returned 201, and the same create again returned 200;
+  - Complete returned 200;
+  - a create on GR-100003 returned 409 `BR-1`.
+- `npm run build` succeeds; the output was deleted.
+- **I didn't click through the screen in a browser** (no browser is available to me in this session). The screen's behaviour is covered by the component tests above. Please open it once with `npm run dev` in `ui/` while the API runs.
+
+Changes from the plan:
+- Four tests added, and twelve mutation checks.
+- Decision 15.
+- The files listed above. The plan named only the test files.
+
+`npm test`: .NET 159 passed, UI 30 passed, on two runs. Type check (`tsc -b`): no errors.
 
 ---
 
@@ -1340,3 +1444,4 @@ Made on 2026-11-13:
 12. Problem `type` values are absolute URIs, `https://granttracker.example/problems/<code>`, with the short code in a `code` extension field that the UI and tests switch on (DESIGN.md §5.1). No documentation pages are published at those URIs; this is a recorded limitation (DESIGN.md §10.8).
 13. `Grant.Close` rejects a note longer than 1000 characters after trimming: 400 keyed on `note`, checked after BR-5 (DESIGN.md §3.1, BR-5, §5, §5.1).
 14. `POST /grants/{id}/tasks` returns `Location: /grants/{id}`, because there is no endpoint for a single task (DESIGN.md §5).
+15. After a 409 `duplicate-task-id`, the Add task form takes a new task id and keeps the typed values; the grant reloads (DESIGN.md §6.3, §6.5).

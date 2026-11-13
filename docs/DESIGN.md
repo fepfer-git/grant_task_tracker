@@ -419,6 +419,7 @@ One fetch helper is used for every request. It sorts each outcome into one of th
 - **Buttons** (Add task, Complete, Close) are disabled while their request is waiting, so a double-click can't send twice. They're enabled again as soon as any response arrives or the request times out, so the officer can send again.
 - **Add task form:**
   - The form creates the task id with `crypto.randomUUID()` and keeps it until the server confirms the task (200 or 201). Sending again after a failure uses the same id. After a success, the form clears and creates a new id for the next task.
+  - After a 409 `duplicate-task-id`, the id belongs to a task that was already saved, so the form takes a new id and keeps the typed values. The grant reloads, so the saved task appears. If the officer still wants the edited task, sending again creates it as a new task. Keeping the old id would return the same 409 on every resend.
   - What the officer typed is kept after any failure.
 - **After any 409**, the grant reloads, so the screen shows the current state.
 - `crypto.randomUUID()` only works in a secure context (HTTPS or `localhost`). Development runs on `localhost`, and a real deployment would use HTTPS.
@@ -447,7 +448,7 @@ One fetch helper is used for every request. It sorts each outcome into one of th
 | Repeat a create after the task was completed | 200 with the task as it is now (Completed) |
 | `id` missing or `Guid.Empty` | 400, keyed on `id` |
 | Two identical creates at the same moment | One task. One response is 201 and the other 200 (§6.2 retry). |
-| The officer edits the form after a timeout and sends again with the same id, but the first send had been saved | 409 `duplicate-task-id`. The UI shows the message and reloads the grant, so the saved task appears. |
+| The officer edits the form after a timeout and sends again with the same id, but the first send had been saved | 409 `duplicate-task-id`. The UI shows the message and reloads the grant, so the saved task appears. The form takes a new id and keeps the typed values. |
 | A request times out, but the server saved the change | Banner. Sending again returns 200 (create, complete or close). |
 | The server returns 500 | The same banner as a timeout |
 | A conflict on all 3 attempts | 409 `concurrency-conflict`. The UI shows it and reloads the grant. |

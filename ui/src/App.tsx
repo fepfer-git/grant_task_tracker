@@ -1,8 +1,6 @@
-/** The app shell. The grant screen is built in Part 11. */
+import { GrantScreen } from './GrantScreen'
+import './styles.css'
+
 export default function App() {
-  return (
-    <main>
-      <h1>Grant Task Tracker</h1>
-    </main>
-  )
+  return <GrantScreen />
 }

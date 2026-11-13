@@ -1,0 +1,103 @@
+/* "Function matters more than appearance" (CONTEXT §7): plain, readable, and overdue tasks stand out. */
+
+:root {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  color: #1a1a1a;
+  background: #ffffff;
+}
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  max-width: 30rem;
+}
+
+fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.field-error {
+  color: #b00020;
+  margin: 0;
+}
+
+.banner {
+  background: #fff4e5;
+  border: 1px solid #e07b00;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.problem {
+  background: #fdecea;
+  border: 1px solid #b00020;
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.problem p {
+  margin: 0.25rem 0 0;
+}
+
+.grant-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.grant-facts dd {
+  margin: 0;
+}
+
+.tasks {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+.tasks caption {
+  text-align: left;
+  font-weight: bold;
+}
+
+.tasks th,
+.tasks td {
+  border-bottom: 1px solid #ddd;
+  padding: 0.4rem;
+  text-align: left;
+}
+
+/* Overdue is shown by colour and by the "Overdue" label, so it doesn't rely on colour alone. */
+.tasks tr.overdue {
+  background: #fdecea;
+}
+
+.overdue-label {
+  margin-left: 0.5rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  background: #b00020;
+  color: #ffffff;
+  font-size: 0.85em;
+  font-weight: bold;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
