@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
-import type { CloseGrantRequest, CreateTaskRequest, Grant, GrantListItem, GrantTask } from './types'
+import type { CloseGrantRequest, CreateTaskRequest, Grant, GrantListItem, GrantTask, OverdueTask } from './types'
 
-// One function per endpoint the grant screen uses (DESIGN.md §5). Each returns an ApiResult and never throws.
+// One function per endpoint the UI uses (DESIGN.md §5). Each returns an ApiResult and never throws.
 
 export const listGrants = () => apiFetch<GrantListItem[]>('/grants')
 
@@ -13,6 +13,9 @@ export const addTask = (grantId: string, request: CreateTaskRequest) =>
 
 export const completeTask = (taskId: string) =>
   apiFetch<GrantTask>(`/tasks/${encodeURIComponent(taskId)}/complete`, { method: 'PUT' })
+
+/** Pending tasks past their due date across all grants, most overdue first (BR-6). */
+export const listOverdueTasks = () => apiFetch<OverdueTask[]>('/tasks/overdue')
 
 /** 200 with the closed grant, also when it was already closed (BR-5). 409 BR-5 while a High task is pending. */
 export const closeGrant = (grantId: string, request: CloseGrantRequest) =>

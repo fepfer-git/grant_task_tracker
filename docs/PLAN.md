@@ -1,6 +1,6 @@
 # Build plan
 
-**Status: Approved (revision 2) on 2026-11-12. In progress: Parts 0 to 11 reviewed; Part 12 built, waiting for review.**
+**Status: Approved (revision 2) on 2026-11-12. Bug fixing: Parts 0 to 12 reviewed. The whole application is being tested and reviewed before Part 13.**
 
 Revision 2 adds the decisions from 2026-11-12 (see "Decisions"), the Swagger UI part (Part 9), the date-storage tests, and a fake clock that catches an accidental switch to UTC.
 
@@ -91,7 +91,7 @@ Where each rule and need is tested, by part. BR and OP texts are quoted in full 
 | 9 | Swagger UI (Development only) | Built, reviewed |
 | 10 | UI foundation: app, API client, one test command | Built, reviewed |
 | 11 | UI: grant screen (tasks, Complete, Add task) | Built, reviewed |
-| 12 | UI: close a grant | Built, waiting for review |
+| 12 | UI: close a grant | Built, reviewed |
 | 13 | Documentation: README and testing strategy | Not started |
 
 Parts 0 to 8, 10 and 11 cover what the spec requires. Parts 9 and 12 are spec extras that are in our design. Part 12 comes last among the code parts and can be dropped if time runs short.
@@ -645,7 +645,7 @@ Tests: 13 tests, 18 cases.
 |---|---|---|
 | `GrantReadEndpointTests.cs` | `Given_SeedData_When_ListingGrants_Then_ReturnsAllGrantsWithPendingTaskCounts` (GR-100001: 2, GR-100002: 2, GR-100003: 0, GR-100004: 0) | §5 `pendingTaskCount`, Pending only (§7) |
 | `GrantReadEndpointTests.cs` | `Given_StatusFilter_When_ListingGrants_Then_ReturnsOnlyMatchingGrants` (Theory: Open → GR-100001, 100002, 100004; Closed → GR-100003) | §5 status filter |
-| `GrantReadEndpointTests.cs` | `Given_InvalidStatus_When_ListingGrants_Then_Returns400ProblemDetails` (`?status=Archived` → `type` `https://granttracker.example/problems/validation`, `code` `validation`, error keyed on `status`) | §5, §5.1 |
+| `GrantReadEndpointTests.cs` | `Given_InvalidStatus_When_ListingGrants_Then_Returns400ProblemDetails` (`?status=Archived` → `type` `https://granttracker.example/problems/validation`, `code` `validation`, error keyed on `status`). Renamed and extended in bug fix 1. | §5, §5.1 |
 | `GrantReadEndpointTests.cs` | `Given_PinnedClock_When_GettingGrant_Then_TodayIsSydneyDate` (`"2026-03-11"`) | §4.0 end to end |
 | `GrantReadEndpointTests.cs` | `Given_SeededGrant_When_GettingIt_Then_DatesAreLiteralSydneyDatesAndInstantsEndWithZ` (`applicationDate` `"2026-01-10"`, `dueDate` `"2026-03-08"`, `createdAtUtc` `"2026-01-09T22:00:00Z"`, GR-100003 `closedAtUtc` `"2025-10-16T22:00:00Z"`) | §3.6, §5 date serialisation, §8 seed |
 | `GrantReadEndpointTests.cs` | `Given_ExistingGrant_When_GettingIt_Then_TasksHaveStatusAndIsOverdue` (GR-100001: Check eligibility documents Completed/not overdue, Verify bank details Pending/overdue, Request quote for tools Pending/not overdue, in that order) | §5, BR-6 `isOverdue` |
@@ -1492,6 +1492,91 @@ Changes from the plan:
 
 ---
 
+## Bug fixes
+
+Found while testing the whole application after Part 12. Each fix has a test that failed before it.
+
+### Bug fix 1: `GET /grants?status=` accepted numbers (2026-11-14)
+
+**Bug:** §5 says an enum in a request must be its name, but the query string used the framework's enum binder:
+- `?status=0` and `?status=1` returned Open and Closed grants. A number depends on the enum's order, which clients can't see and which may change.
+- `?status=Open,Closed` returned the Closed grants: the framework read it as flags, Open (0) | Closed (1) = Closed.
+- `?status=7` and `?status=Archived` were rejected, but with two different messages ("The value '7' is invalid." and "The value 'Archived' is not valid.") that didn't say which values are allowed.
+
+**Fix:**
+- New file `src/GrantTracker.Api/Binding/EnumNameModelBinder.cs` (agreed with you): `EnumNameModelBinderProvider` and `EnumNameModelBinder`. An enum in a query string or route binds by name only, ignoring case and surrounding spaces, like enum names in a JSON body. Anything else is a 400 keyed on the parameter: "Use one of: Open, Closed." An empty value is the same as no value.
+- `Program.cs`: the provider replaces the framework's `EnumTypeModelBinderProvider` in the same position, so the body, header and other binders still come before it. It applies to every enum bound from a query string or route, not only `status`.
+- The parameter stays `GrantStatus?`, so the OpenAPI document still refers to the `GrantStatus` schema, which lists `Open` and `Closed`.
+- DESIGN.md §5 updated.
+
+**Tests:** .NET 159 → 169 passed.
+
+| File | Test | Covers |
+|---|---|---|
+| `GrantReadEndpointTests.cs` | `Given_StatusThatIsNotAName_When_ListingGrants_Then_Returns400ProblemDetails` (Theory: `Archived`, `0`, `1`, `7`, `-1`, `Open,Closed`; each a 400 `validation` with `errors.status` = `["Use one of: Open, Closed."]`). Replaces `Given_InvalidStatus_...`. Failed for all six before the fix: `0`, `1` and `Open,Closed` returned 200, and the other three had the framework's messages. | §5 enum names in requests |
+| `GrantReadEndpointTests.cs` | `Given_StatusNameInAnotherCase_When_ListingGrants_Then_ReturnsOnlyMatchingGrants` (Theory: `open`, `CLOSED`, ` Closed `) | §5, behaviour kept |
+| `GrantReadEndpointTests.cs` | `Given_EmptyStatus_When_ListingGrants_Then_ReturnsAllGrants` (`?status=` → all four grants) | §5, behaviour kept |
+| `OpenApiTests.cs` | `Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_GrantStatusFilterListsItsNames` (the `status` parameter is `{"$ref":"#/components/schemas/GrantStatus"}`) | §5 OpenAPI |
+
+The three "behaviour kept" tests passed before the fix too. They stop the new binder from changing what already worked.
+
+Mutation checks. Each was applied, the listing and OpenAPI tests were run, and the file was restored.
+
+| # | Mutation | Failed tests |
+|---|---|---|
+| 1 | Binder not registered (framework binder used) | `Given_StatusThatIsNotAName_...` (all 6) |
+| 2 | Names matched case-sensitively | `Given_StatusNameInAnotherCase_...` (`open`, `CLOSED`) |
+| 3 | Value not trimmed | `Given_StatusNameInAnotherCase_...` (` Closed `) |
+| 4 | Empty value not treated as no value | `Given_EmptyStatus_...` |
+| 5 | A number accepted when no name matches | `Given_StatusThatIsNotAName_...` (`0`, `1`, `7`, `-1`, `Open,Closed`) |
+| 6 | Message without the allowed names | `Given_StatusThatIsNotAName_...` (all 6) |
+
+### Bug fix 2: no way to see overdue tasks across grants (2026-11-14)
+
+**Issue:** `GET /tasks/overdue` existed, but the UI never called it. To find every overdue task, an officer had to choose each grant in turn. The spec doesn't require an overdue screen; you asked for one, as a dialog. The `OverdueTask` type in `api/types.ts` was unused.
+
+**Built:**
+- `ui/src/api/grants.ts`: `listOverdueTasks()`.
+- New file `ui/src/OverdueTasks.tsx` (agreed with you): the "Show overdue tasks" button and its dialog. Columns: Grant, Task, Due date, Priority, in the API's order. It loads the list each time it opens, ignores a response from an older load, and shows loading, empty and server-problem states (with Try again). Each row has "Open grant", which closes the dialog and selects that grant. Escape or Close shuts it, and focus returns to the button.
+- `GrantScreen.tsx`: the button sits beside the page heading.
+- `styles.css`: page header, backdrop and dialog styles.
+- Not built, as you agreed: Complete in the dialog, and a "days overdue" column.
+- DESIGN.md BR-6 UI and §9, and the README's "Try it" step, updated.
+
+**Tests:** new file `ui/src/OverdueTasks.test.tsx`, 8 tests, 9 cases, through the whole screen with `mockApi`. UI 40 → 49 passed.
+
+| Test | Covers |
+|---|---|
+| `given overdue tasks on two grants, when showing overdue tasks, then they are listed in the API order with grant, task, due date and priority` (8 March 2026 and 10 March 2026, in America/Los_Angeles) | BR-6 list, §5 dates as text |
+| `given no overdue tasks, when showing overdue tasks, then the dialog says there are none` | Empty state |
+| `given the API returns 500, when showing overdue tasks, then the banner is shown in the dialog` | §6.3 banner |
+| `given the first load failed, when trying again, then the overdue tasks are listed` | Try again |
+| `given an overdue task on another grant, when selecting Open grant, then the dialog closes and that grant is shown` | Open grant |
+| `given the dialog is open, when %s, then the dialog closes and focus returns to the button` (Each: pressing Escape, selecting Close) | Closing, focus |
+| `given the first load is still waiting, when the dialog is closed and shown again, then the older response is ignored` | Stale response |
+| `given a task was completed after the list was shown, when showing overdue tasks again, then the list is loaded again` | Current list on each open |
+
+Mutation checks. Each was applied, `OverdueTasks.test.tsx` was run, and the file was restored. A 13th check, "closing the dialog doesn't invalidate the waiting load", passed every test: reopening starts a newer load anyway, so that line did nothing. It was removed from the code instead of being tested.
+
+| # | Mutation | Failed tests |
+|---|---|---|
+| 1 | Button not on the screen | All 9 |
+| 2 | Rows in reverse order | `... listed in the API order ...` |
+| 3 | Raw `YYYY-MM-DD` due date shown | `... listed in the API order ...` |
+| 4 | No empty message | `... says there are none`, `... older response is ignored` |
+| 5 | No banner | `given the API returns 500, ...`, `given the first load failed, ...` |
+| 6 | Try again does nothing | `given the first load failed, ...` |
+| 7 | Open grant doesn't select the grant | `... selecting Open grant ...` |
+| 8 | Open grant leaves the dialog open | `... selecting Open grant ...` |
+| 9 | Escape ignored | `... pressing Escape ...`, `... older response is ignored`, `... loaded again` |
+| 10 | Focus not returned | Both closing cases |
+| 11 | List kept after the first load | `... loaded again` |
+| 12 | Stale response not ignored | `... older response is ignored` |
+
+`npm test`: .NET 169, UI 49 passed. Type check and build clean.
+
+---
+
 ## Decisions
 
 Made on 2026-11-12:
@@ -1514,3 +1599,9 @@ Made on 2026-11-13:
 13. `Grant.Close` rejects a note longer than 1000 characters after trimming: 400 keyed on `note`, checked after BR-5 (DESIGN.md §3.1, BR-5, §5, §5.1).
 14. `POST /grants/{id}/tasks` returns `Location: /grants/{id}`, because there is no endpoint for a single task (DESIGN.md §5).
 15. After a 409 `duplicate-task-id`, the Add task form takes a new task id and keeps the typed values; the grant reloads (DESIGN.md §6.3, §6.5).
+
+Made on 2026-11-14:
+
+16. An enum in a query string or route is bound by name only, ignoring case, through a custom model binder in a new file `Binding/EnumNameModelBinder.cs`. Numbers and the flags form are a 400 "Use one of: …" (DESIGN.md §5, bug fix 1).
+17. A "Show overdue tasks" dialog lists `GET /tasks/overdue`. It's read-only, with "Open grant" on each row, and has no "days overdue" column (DESIGN.md BR-6 UI, bug fix 2).
+18. An overdue pending task can still be completed. This is recorded as an assumption (DESIGN.md §10.10, README).

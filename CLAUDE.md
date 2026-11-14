@@ -2,7 +2,9 @@
 
 ## Phase
 
-We are in the build phase. `docs/DESIGN.md` is the agreed design: build what it says. If the design is silent, unclear or turns out to be wrong, stop and ask (see Context) instead of deciding on your own. When we change a decision, update `docs/DESIGN.md` too.
+We are in the bug-fixing phase. Parts 0 to 12 of `docs/PLAN.md` are built and reviewed. I'm testing the whole application and reviewing the code, and Part 13 (documentation) starts only when bug fixing is done. Fix the bugs and issues I report, one at a time, each with a test that fails before the fix, and wait for my feedback between them.
+
+`docs/DESIGN.md` is the agreed design: build what it says. If the design is silent, unclear or turns out to be wrong, stop and ask (see Context) instead of deciding on your own. When we change a decision, update `docs/DESIGN.md` too.
 
 Work from `docs/PLAN.md`:
 

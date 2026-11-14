@@ -1,18 +1,28 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GrantTracker.Api.Binding;
 using GrantTracker.Api.Errors;
 using GrantTracker.Api.Services;
 using GrantTracker.Api.Startup;
 using GrantTracker.Api.Time;
 using GrantTracker.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Request DTOs mark optional fields with '?', so the framework's implicit "required" check isn't needed; it would also
 // add a misleading error for the whole body when one field can't be read.
-builder.Services.AddControllers(options => options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true)
+builder.Services.AddControllers(options =>
+    {
+        options.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
+
+        // An enum in a query string or route must be its name, as in a JSON body (§5). The binder takes the place of
+        // the framework's enum binder, so the body, header and other binders still come before it.
+        var enumBinder = options.ModelBinderProviders.OfType<EnumTypeModelBinderProvider>().Single();
+        options.ModelBinderProviders[options.ModelBinderProviders.IndexOf(enumBinder)] = new EnumNameModelBinderProvider();
+    })
     .AddJsonOptions(options => ConfigureJson(options.JsonSerializerOptions))
     .ConfigureApiBehaviorOptions(options => options.InvalidModelStateResponseFactory = InvalidInputResponse.Create);
 

@@ -71,15 +71,58 @@ public class GrantReadEndpointTests
         Assert.All(grants, g => Assert.Equal(status, (string)g!["status"]!));
     }
 
-    [Fact]
-    public async Task Given_InvalidStatus_When_ListingGrants_Then_Returns400ProblemDetails()
+    [Theory]
+    [InlineData("open", new[] { "GR-100001", "GR-100002", "GR-100004" })]
+    [InlineData("CLOSED", new[] { "GR-100003" })]
+    [InlineData(" Closed ", new[] { "GR-100003" })]
+    public async Task Given_StatusNameInAnotherCase_When_ListingGrants_Then_ReturnsOnlyMatchingGrants(string status, string[] expectedReferences)
     {
         // Arrange
         using var factory = new GrantTrackerApiFactory();
         var client = factory.CreateClient();
 
         // Act
-        var response = await client.GetAsync("/grants?status=Archived", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync($"/grants?status={Uri.EscapeDataString(status)}", TestContext.Current.CancellationToken);
+
+        // Assert: names are matched like enum names in a JSON body, ignoring case (§5).
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var grants = await ReadArray(response);
+        Assert.Equal(expectedReferences, grants.Select(g => (string)g!["reference"]!));
+    }
+
+    [Fact]
+    public async Task Given_EmptyStatus_When_ListingGrants_Then_ReturnsAllGrants()
+    {
+        // Arrange
+        using var factory = new GrantTrackerApiFactory();
+        var client = factory.CreateClient();
+
+        // Act
+        var response = await client.GetAsync("/grants?status=", TestContext.Current.CancellationToken);
+
+        // Assert: an empty value is the same as no filter.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var grants = await ReadArray(response);
+        Assert.Equal(["GR-100001", "GR-100002", "GR-100003", "GR-100004"], grants.Select(g => (string)g!["reference"]!));
+    }
+
+    // Only a status name is accepted (§5). A number depends on the enum's order, which clients can't see and which may
+    // change. "Open,Closed" is the framework's flags syntax: it would be read as Open | Closed = Closed.
+    [Theory]
+    [InlineData("Archived")]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("7")]
+    [InlineData("-1")]
+    [InlineData("Open,Closed")]
+    public async Task Given_StatusThatIsNotAName_When_ListingGrants_Then_Returns400ProblemDetails(string status)
+    {
+        // Arrange
+        using var factory = new GrantTrackerApiFactory();
+        var client = factory.CreateClient();
+
+        // Act
+        var response = await client.GetAsync($"/grants?status={Uri.EscapeDataString(status)}", TestContext.Current.CancellationToken);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -87,7 +130,7 @@ public class GrantReadEndpointTests
         var problem = await ReadObject(response);
         Assert.Equal("https://granttracker.example/problems/validation", (string)problem["type"]!);
         Assert.Equal("validation", (string)problem["code"]!);
-        Assert.NotNull(problem["errors"]!["status"]);
+        Assert.Equal(["Use one of: Open, Closed."], problem["errors"]!["status"]!.AsArray().Select(m => (string)m!));
     }
 
     [Fact]

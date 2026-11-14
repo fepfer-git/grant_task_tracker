@@ -4,12 +4,13 @@ import type { Grant, GrantListItem, GrantTask, ProblemDetails } from './api/type
 import { AddTaskForm } from './AddTaskForm'
 import { CloseGrant } from './CloseGrant'
 import { formatCalendarDate } from './dates'
+import { OverdueTasks } from './OverdueTasks'
 import { ProblemMessage, ServerProblemBanner } from './ProblemMessage'
 import { TaskList } from './TaskList'
 
 /**
  * The one screen (CONTEXT §7): choose a grant, see its tasks with overdue ones highlighted, complete and add tasks,
- * and close the grant. Every request goes through `apiFetch`, so each ends in success, an API error or a server
+ * and close the grant. "Show overdue tasks" lists the overdue tasks across all grants and can open any of them. Every request goes through `apiFetch`, so each ends in success, an API error or a server
  * problem (§6.3).
  */
 export function GrantScreen() {
@@ -88,7 +89,10 @@ export function GrantScreen() {
 
   return (
     <main>
-      <h1>Grant Task Tracker</h1>
+      <header className="page-header">
+        <h1>Grant Task Tracker</h1>
+        <OverdueTasks onOpenGrant={(grantId) => void selectGrant(grantId)} />
+      </header>
 
       {serverProblem && <ServerProblemBanner />}
 

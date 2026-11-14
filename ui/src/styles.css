@@ -123,3 +123,41 @@ fieldset {
   display: flex;
   gap: 0.5rem;
 }
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+/* The overdue tasks dialog sits over the screen. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3rem 1rem;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.dialog.modal {
+  margin-top: 0;
+  width: 100%;
+  max-width: 56rem;
+  max-height: calc(100vh - 6rem);
+  overflow: auto;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-header h2 {
+  margin: 0;
+}

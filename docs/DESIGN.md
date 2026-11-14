@@ -269,6 +269,13 @@ UI:
 - `GET /tasks/overdue`: ordered by `DueDate` ascending (most overdue first), then `Priority` descending, then `Id` (deterministic).
 - Each item includes the grant reference and organisation, so the list makes sense without the grant screen.
 - UI: overdue tasks are highlighted on the grant screen.
+- UI: a "Show overdue tasks" button opens a dialog listing `GET /tasks/overdue` across all grants, so an officer doesn't have to check each grant in turn. Added in bug fixing; the spec doesn't require it.
+  - Columns: Grant (reference – organisation), Task, Due date, Priority, in the API's order.
+  - The list is loaded each time the dialog opens, so it's current. A response from an older load is ignored.
+  - Loading, "There are no overdue tasks.", and the server-problem banner (§6.3) with a Try again button.
+  - Read-only: each row has "Open grant", which closes the dialog and shows that grant, where the task can be completed. Completing in the dialog was rejected: completion keeps one place with its 409 and reload handling.
+  - No "days overdue" column: the overdue list doesn't include `today`, and the UI never uses the browser's clock.
+  - Escape or Close shuts the dialog, and focus returns to the button.
 
 ### 4.7 Closed grants are read-only
 
@@ -302,7 +309,7 @@ The check lives in the domain (`GrantTask.Complete` asks its grant), so every en
 
 Enums are stored as integers in the database (`GrantStatus`: `Open = 0`, `Closed = 1`; `TaskPriority`: `Low = 1`, `Medium = 2`, `High = 3`), but serialised as strings in JSON/API DTOs (`"Open"`, `"Closed"`, `"Low"`, `"Medium"`, `"High"`). `GrantTaskStatus` enum used in DTOs and domain logic is also mapped to strings (`"Pending"`, `"Completed"`, `"Cancelled"`). `DateOnly` is serialised as `"YYYY-MM-DD"`. `DateTime` values are ISO 8601 UTC with a `Z` suffix; the UTC converter (§3.6) makes sure values read from SQLite keep it. The UI treats `"YYYY-MM-DD"` values as plain text: it never turns them into a JavaScript `Date`, which would read them as midnight UTC and show the previous day in time zones west of UTC.
 
-An enum in a request must be its name: a number such as `3` is a 400, not `High`. Numbers are read only from JSON numbers, never from strings. The OpenAPI document uses the same JSON settings, so it describes enums by name, dates as `format: date`, and counts as integers, which is what the API sends.
+An enum in a request must be its name: a number such as `3` is a 400, not `High`. Numbers are read only from JSON numbers, never from strings. The same applies to an enum in a query string or route, such as `GET /grants?status=`: the name is matched ignoring case and surrounding spaces, and anything else (`1`, `7`, `Archived`, or the flags form `Open,Closed`) is a 400 keyed on the parameter with the message "Use one of: Open, Closed." An empty value is the same as no filter. The framework's enum binder would accept numbers, so a custom binder (`EnumNameModelBinder`) takes its place for every enum bound from a query string or route. The OpenAPI document uses the same JSON settings, so it describes enums by name, dates as `format: date`, and counts as integers, which is what the API sends.
 
 ### 5.1 Error handling
 
@@ -540,7 +547,7 @@ Tests never depend on the real date, the machine's time zone, or test order.
 | Clock unit | `tests/GrantTracker.Tests/Api/` | `IAppClock.Today` in Sydney, across midnight and DST | `FakeTimeProvider` |
 | Infrastructure | `tests/GrantTracker.Tests/Infrastructure/` | Check constraint, version renewal and conflicts, query expressions, enum sort order, date storage and the UTC converter (§3.6), seed data | SQLite in-memory with the real migrations applied, one database per test |
 | API integration | `tests/GrantTracker.Tests/Api/` | Endpoints, status codes, ProblemDetails shape, seed scenarios, safe repeats (including task creation), retry on conflict, health checks | `WebApplicationFactory` + SQLite in-memory (one open connection per test, so each test gets its own fresh database) + `FakeTimeProvider` pinned to `2026-03-10T22:00:00Z` |
-| UI component | `ui/src/`, next to the components | A few behaviours that matter most: API errors shown, the server-problem banner, safe resending, overdue highlighting | Vitest + React Testing Library (jsdom). `fetch` is mocked. Fake timers drive the 10-second timeout, so tests don't wait. Dates come from the mocked API's `today`, not the browser clock. |
+| UI component | `ui/src/`, next to the components | A few behaviours that matter most: API errors shown, the server-problem banner, safe resending, overdue highlighting, the overdue tasks dialog | Vitest + React Testing Library (jsdom). `fetch` is mocked. Fake timers drive the 10-second timeout, so tests don't wait. Dates come from the mocked API's `today`, not the browser clock. |
 
 ### 9.1 Key scenarios
 
@@ -692,3 +699,9 @@ The spec mentions officers working in several regional offices (§2, OP-2), but 
 - **Decision:** Keep the document to success responses for now. The user will review whether to add the error responses.
 - **Why it's acceptable for now:** The document is a development aid, not a published contract. §5 and §5.1 list every status code and `code` for each endpoint, and the tests check them. The API behaves the same either way; only the description is incomplete.
 - **If we add them:** Put `[ProducesResponseType<ProblemDetails>(...)]` for each error status on each action, matching the §5 table, or add a document transformer that adds them from one place. Add an `OpenApiTests` case per endpoint so the document can't drift from §5.
+
+### 10.10 An overdue task can still be completed (assumption)
+- **Situation:** No rule says whether a task can be completed after its due date. BR-4 says only that completing a task records the date, and that completing it again doesn't change that date. BR-2's "due date cannot be in the past" applies when a task is added, not when it's completed.
+- **Decision:** An overdue pending task can be completed, like any other pending task on an open grant. Completing it records the completion date, and the task is no longer overdue (BR-6), so it leaves `GET /tasks/overdue`. The only things that stop a completion are a closed grant (409 `grant-closed`) and an unknown task (404).
+- **Why:** Officers look for overdue tasks so they can deal with them, and completing a task is how they clear it. Blocking it would also make BR-5 a dead end: a grant with an overdue pending High-priority task could never be closed.
+- **What isn't kept:** whether a task was completed late. It can still be worked out by comparing `completedAtUtc` with `dueDate`, but nothing shows it.

@@ -99,6 +99,24 @@ public class OpenApiTests
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(expectedValues), values), $"{schema} enum was {values?.ToJsonString()}");
     }
 
+    [Fact]
+    public async Task Given_DevelopmentEnvironment_When_GettingOpenApiDocument_Then_GrantStatusFilterListsItsNames()
+    {
+        // Arrange
+        using var factory = new GrantTrackerApiFactory();
+        var client = factory.CreateClient();
+
+        // Act
+        var document = await GetDocument(client);
+
+        // Assert: the filter refers to the GrantStatus schema, which lists "Open" and "Closed", so clients can see the
+        // accepted values. A plain string parameter would hide them.
+        var parameter = document["paths"]!["/grants"]!["get"]!["parameters"]!.AsArray().Single()!;
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse("""{"name":"status","in":"query","schema":{"$ref":"#/components/schemas/GrantStatus"}}"""), parameter),
+            $"The status parameter was {parameter.ToJsonString()}");
+    }
+
     [Theory]
     [InlineData("TaskDto", "dueDate", """{"type":"string","format":"date"}""")]
     [InlineData("CreateTaskRequest", "dueDate", """{"type":["null","string"],"format":"date"}""")]

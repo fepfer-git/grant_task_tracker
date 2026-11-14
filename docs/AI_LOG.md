@@ -77,6 +77,12 @@
 |---|---|---|
 | Part 9 reported as Built. The planned `Given_ProductionEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404` was the only test of "Development only", and its mutation check replaced the condition with one that's true in every environment. | The user asked whether the tests catch the `IsDevelopment()` check being removed, and said the tests seemed to still pass. Deleting the check (three ways: the `if` line only, the `if` and its braces, `if (true)`) failed the test each time, so that case was covered. But the test checked only `Production`, so `if (!app.Environment.IsProduction())` or `IsDevelopment() \|\| IsStaging()` passed every test while exposing the document and Swagger UI in Staging and other environments. | The test became `Given_NonDevelopmentEnvironment_When_GettingOpenApiDocumentOrSwagger_Then_Returns404`, covering `Production`, `Staging` and a custom `Uat`, each with the three paths (9 cases). Mutation checks 9 to 12 were added, and all of them fail it. Part 9 build record updated. |
 
+### 2026-11-14: Bug fix 1 (`GET /grants?status=` accepted numbers)
+
+| What I proposed | What was wrong | What we changed |
+|---|---|---|
+| Part 5 bound `GET /grants?status=` to `GrantStatus?` with the framework's enum binder, and reported it as following §5. Its only invalid-status test used `Archived`. | The user found that `?status=1` was accepted, and said a number depends on the enum's order, which clients can't know. §5 already said an enum in a request must be its name; I enforced that for JSON bodies only. Checked: `0`, `1` and `Open,Closed` (read as flags, = Closed) returned 200, and `7` and `Archived` were rejected with two different framework messages that didn't list the allowed values. | A custom binder (new file `Binding/EnumNameModelBinder.cs`, agreed with the user) replaces the framework's enum binder: names only, ignoring case, otherwise a 400 "Use one of: Open, Closed." Tests for six invalid values, names in another case, an empty value, and the OpenAPI parameter. Six mutation checks, all caught. DESIGN.md §5 and PLAN.md (bug fix 1, decision 16) updated. |
+
 ## Prompt log
 
 ### 2026-11-11 01:49 (+07:00)
@@ -249,3 +255,15 @@
 ### 2026-11-13 18:59 (+07:00)
 
 > I accept this. Please go ahead with the next part.
+
+### 2026-11-13 19:37 (+07:00)
+
+> Part 12 is accept. Now I will test the application throught out again. Review all of the code again and finding bugs and issues before we go to part 13. Please update the process  stage to bug fixing. Then stop and waiting for my feedback.
+
+### 2026-11-14 16:02 (+07:00)
+
+> Please help me check the: GET /grants?status=1, I think we accept number here is not really realistc as the enum order could be change, client may not aware that, it is also ahrad for client to understand what is 0, 1, 2, or many be 7. So I think it is better that we accept a string as the text will explain itself. So pelase consider and update that. Also, I notice there is no screen to list out overdue tasks, so I think it would be nice if we have a button to open a modal that show a table of task that is overdue, it is not rquire, but I think it is needed instead of mnually scanning through the list of grant. Another thing we need to record in the asumption is that, the over due task could be closed. There is no requirement justify this, but I think it is reasonable to do so.
+
+### 2026-11-14 16:14 (+07:00)
+
+> 3. Assumption: an overdue task can still be completed | Yes I meant a task with pending status, that is overdue, can be still completed. And I agree with 2 of your recomendations.
